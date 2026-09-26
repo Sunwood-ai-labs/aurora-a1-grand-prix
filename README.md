@@ -1,7 +1,7 @@
 # AURORA A1 Grand Prix
 
 A browser racing game driven by the **AURORA A1** F1 concept car built in FreeCAD
-(`C:\Prj\FreeCAD_Demo_001\aurora_a1`). The car mesh, part colours and livery decals
+([Sunwood-ai-labs/aurora-a1-freecad](https://github.com/Sunwood-ai-labs/aurora-a1-freecad)). The car mesh, part colours and livery decals
 come straight from the CAD build script.
 
 **▶ Play online: https://sunwood-ai-labs.github.io/aurora-a1-grand-prix/**
