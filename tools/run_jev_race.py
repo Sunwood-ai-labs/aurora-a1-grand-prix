@@ -232,7 +232,7 @@ async def run(args):
 def main():
     ap = argparse.ArgumentParser(description="Record an AURORA A1 race driven by Jev-Omni")
     ap.add_argument("--colab-session", default=None, help="google-colab-cli session with Jev-Omni loaded (e.g. jev-racer)")
-    ap.add_argument("--mode", choices=["vision", "text"], default="vision")
+    ap.add_argument("--mode", choices=["vision", "sensor", "fusion", "text"], default="vision")
     ap.add_argument("--timing", choices=["realtime", "step"], default="realtime")
     ap.add_argument("--cam", choices=["chase", "far", "cockpit", "tv"], default="cockpit")
     ap.add_argument("--laps", type=int, default=1)

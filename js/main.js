@@ -217,7 +217,7 @@ const audio = new Audio();
 let cars = [], player = null, template = null;
 let state = 'loading', raceTime = 0, countdown = 0, laps = 3, diff = 1, bestLap = Infinity;
 let lastLight = -1, msgTimer = 0;
-let jevMode = 'vision'; // 'off' | 'vision' (screen frames) | 'text' (course telemetry)
+let jevMode = 'vision'; // 'off' | 'vision' (screen frames) | 'sensor' (range sensors) | 'fusion' (frames + sensors) | 'text' (course telemetry)
 const jevProfile = speedProfile(1.0);
 try { bestLap = parseFloat(localStorage.getItem('aurora_best') || 'Infinity'); } catch { /* storage unavailable */ }
 $('best').textContent = fmt(bestLap);
@@ -245,7 +245,7 @@ function buildCars() {
 function startRace() {
   buildCars();
   raceTime = 0; countdown = 0; lastLight = -1; state = 'countdown';
-  camMode = jevMode === 'vision' ? CAMS.indexOf('COCKPIT') : 0; $('cam').textContent = `CAM: ${CAMS[camMode]} (C)`;
+  camMode = jevMode !== 'off' && jevMode !== 'text' ? CAMS.indexOf('COCKPIT') : 0; $('cam').textContent = `CAM: ${CAMS[camMode]} (C)`;
   jevLog = []; jevBusy = false; jevTimer = 0;
   camYaw = player.yaw;
   $('title').classList.add('hidden'); $('result').classList.add('hidden'); $('hud').classList.remove('hidden');
@@ -519,6 +519,7 @@ let jevLastResult = {
   backend: 'READY',
   summary: '',
 };
+let jevSensors = null;
 let jevBusy = false, jevTimer = 0, jevLog = [], jevHz = 0, jevLastAt = 0;
 const jevFrame = document.createElement('canvas');
 jevFrame.width = 512; jevFrame.height = 288;
@@ -536,7 +537,7 @@ function initJevHUD() {
 }
 
 function cycleJevMode() {
-  const order = ['off', 'vision', 'text'];
+  const order = ['off', 'vision', 'sensor', 'fusion', 'text'];
   jevMode = order[(order.indexOf(jevMode) + 1) % order.length];
   if (player) player.name = jevMode === 'off' ? 'YOU' : 'JEV-OMNI';
   showMsg(`JEV-OMNI: ${jevMode.toUpperCase()}`, 1.2);
@@ -561,17 +562,47 @@ function courseTelemetry(car) {
   return { vt, errRad, curve };
 }
 
+// LiDAR-like range sensor: free asphalt distance along rays from the car (+angle = right)
+const SENSOR_ANGLES = [-60, -30, -10, 0, 10, 30, 60], SENSOR_MAX = 120;
+function readSensors(car) {
+  const edge = track.halfW + track.kerbW;
+  const rays = SENSOR_ANGLES.map((deg) => {
+    const a = car.yaw - deg * Math.PI / 180, dir = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+    let hint = car.idx, r = 0;
+    while (r < SENSOR_MAX) {
+      const t = track.locate(car.pos.clone().addScaledVector(dir, r + 1.5), hint);
+      if (Math.abs(t.d) > edge) break;
+      hint = t.i; r += 1.5;
+    }
+    return Math.round(r);
+  });
+  return { rays, left: +(track.halfW + car.d).toFixed(1), right: +(track.halfW - car.d).toFixed(1) };
+}
+function sensorText(sn) {
+  const name = (deg) => deg === 0 ? 'straight ahead' : `${Math.abs(deg)} deg ${deg < 0 ? 'left' : 'right'}`;
+  const rays = SENSOR_ANGLES.map((deg, k) => `${name(deg)} ${sn.rays[k] >= SENSOR_MAX ? `${SENSOR_MAX}+` : sn.rays[k]} m`).join(', ');
+  return `Range sensors (distance of open track along each direction): ${rays}. Distance to the track edge: left ${sn.left} m, right ${sn.right} m.`;
+}
+
 // What the model is given. VISION: the rendered 3D frame (the HUD is DOM, so it is not in the canvas)
-// plus the speed/gear a driver reads off the dashboard. TEXT: course telemetry computed by the game.
+// plus the speed/gear a driver reads off the dashboard. SENSOR: range-sensor readings only (no image).
+// FUSION: the frame plus the range-sensor readings.
+// TEXT: course telemetry computed by the game.
 function buildJevInput(car) {
   const kmh = Math.round(car.v * 3.6), g = gearOf(car.v);
   const question = 'What should the driver do right now to stay on the track and drive fast?';
   const options = JEV_OPTIONS.map((o) => o.text);
-  if (jevMode === 'vision') {
+  if (jevMode === 'sensor') {   // range sensors only, no image
+    const sn = readSensors(car);
+    return { state: `You are driving an F1 race car on an asphalt circuit. Speed: ${kmh} km/h, gear ${g}. ${sensorText(sn)}`,
+      question, options, modality: 'text', sensors: sn };
+  }
+  if (jevMode === 'vision' || jevMode === 'fusion') {
     jevFrame.getContext('2d').drawImage(canvas, 0, 0, jevFrame.width, jevFrame.height);
+    const sn = jevMode === 'fusion' ? readSensors(car) : null;
     return {
-      state: `${CAMS[camMode].toLowerCase()} camera view of your F1 race car on an asphalt circuit. Speed: ${kmh} km/h, gear ${g}.`,
-      question, options, modality: 'image', image_base64: jevFrame.toDataURL('image/jpeg', 0.8),
+      state: `${CAMS[camMode].toLowerCase()} camera view of your F1 race car on an asphalt circuit. Speed: ${kmh} km/h, gear ${g}.` + (sn ? ' ' + sensorText(sn) : ''),
+      question, options, modality: 'image', image_base64: jevFrame.toDataURL('image/jpeg', 0.8), sensors: sn,
     };
   }
   const t = courseTelemetry(car), errDeg = t.errRad * (180 / Math.PI);
@@ -611,6 +642,7 @@ async function pollJev(car) {
   jevBusy = true;
   const t0 = performance.now();
   const inp = buildJevInput(car);
+  jevSensors = inp.sensors || null;
   try {
     const resp = await fetch('/api/jev/decide', {
       method: 'POST',
@@ -657,7 +689,7 @@ function updateJevHUD() {
     badge.className = 'badge';
     meta.innerHTML = 'Press <kbd>J</kbd> to activate Jev-Omni AI';
   } else {
-    badge.textContent = `${jevMode === 'vision' ? 'VISION' : 'TEXT'} · ${jevTiming === 'step' ? 'STEP' : 'REALTIME'}`;
+    badge.textContent = `${jevMode === 'fusion' ? 'V+S' : jevMode.toUpperCase()} · ${jevTiming === 'step' ? 'STEP' : 'REALTIME'}`;
     badge.className = 'badge ' + jevMode;
     meta.innerHTML = `<span>${jevLastResult.backend}</span><span>${jevLastResult.latency_ms} ms · ${jevHz.toFixed(1)} Hz</span>`;
   }
@@ -669,7 +701,11 @@ function updateJevHUD() {
     if (bar) bar.style.width = `${pct}%`;
     if (txt) txt.textContent = `${pct}%`;
   }
-  if (st) st.textContent = jevMode === 'off' ? '' : (jevLastResult.summary || 'Waiting for race start...');
+  if (st) {
+    st.textContent = jevMode === 'off' ? '' : (jevLastResult.summary || 'Waiting for race start...');
+    if (jevSensors) st.textContent += `
+SENSOR ${SENSOR_ANGLES.map((d, k) => `${d > 0 ? 'R' : d < 0 ? 'L' : ''}${Math.abs(d)}:${jevSensors.rays[k]}`).join(' ')} m`;
+  }
 }
 
 // ---------------------------------------------------------------- main loop
@@ -808,8 +844,9 @@ window.__aurora = {
   // evaluation only: the frame the model would see plus ground truth from the course (never sent to the model)
   probe: () => {
     const m = jevMode; jevMode = 'vision'; const inp = buildJevInput(player); jevMode = m;
+    const sn = readSensors(player);
     const t = courseTelemetry(player);
-    return { img: inp.image_base64, kmh: Math.round(player.v * 3.6), vtKmh: Math.round(t.vt * 3.6), errDeg: +(t.errRad * 180 / Math.PI).toFixed(2), curve: t.curve, surface: player.surface };
+    return { img: inp.image_base64, kmh: Math.round(player.v * 3.6), vtKmh: Math.round(t.vt * 3.6), errDeg: +(t.errRad * 180 / Math.PI).toFixed(2), curve: t.curve, surface: player.surface, sensors: sn, sensorText: sensorText(sn) };
   },
   start: (opts = {}) => {
     if (opts.laps) laps = opts.laps;

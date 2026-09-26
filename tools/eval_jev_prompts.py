@@ -23,14 +23,15 @@ ROAD = ["The road curves to the left", "The road goes straight ahead", "The road
 STEER = ["Turn left", "Keep it straight", "Turn right"]
 
 
-def score(state_fn, question, options, labels, perms):
+def score(state_fn, question, options, labels, perms, use_image=True):
     conf, ok = collections.Counter(), 0
     for f in frames:
         open("/content/ev.jpg", "wb").write(base64.b64decode(f["img"].split(",")[-1]))
         acc = collections.Counter()
         for p in perms:
             opts = [options[i] for i in p]
-            r = classifier.predict(state=state_fn(f), question=question, options=opts, media="/content/ev.jpg", modality="image")  # noqa: F821
+            img = {"media": "/content/ev.jpg", "modality": "image"} if use_image else {}
+            r = classifier.predict(state=state_fn(f), question=question, options=opts, **img)  # noqa: F821
             for text, prob in r["probabilities"].items():
                 acc[labels[options.index(text)]] += prob
         pred = max(acc, key=acc.get)
@@ -54,6 +55,21 @@ runs = {
     "steer 3-way, avg over 3 orders": (plain, "Which way should the driver turn the steering wheel to follow the road?", STEER, LABELS, cyc),
     "road 3-way, avg over 6 orders": (plain, "Where does the road ahead go?", ROAD, LABELS, list(itertools.permutations(range(3)))),
 }
+sensor_only = lambda f: f"You are driving an F1 race car on an asphalt circuit. Speed: {f['kmh']} km/h. {f['sensorText']}"
+fusion = lambda f: f"cockpit camera view of your F1 race car on an asphalt circuit. Speed: {f['kmh']} km/h. {f['sensorText']}"
+Q6 = "What should the driver do right now to stay on the track and drive fast?"
+L6 = ["straight", "left", "right", "left", "right", "straight"]
+Q3 = "Which way should the driver turn the steering wheel to follow the road?"
+if "sensorText" in frames[0]:
+    runs.update({
+        "SENSOR only, 6-way": (sensor_only, Q6, SIX, L6, [tuple(range(6))], False),
+        "SENSOR only, steer 3-way": (sensor_only, Q3, STEER, LABELS, one, False),
+        "VISION+SENSOR, 6-way": (fusion, Q6, SIX, L6, [tuple(range(6))]),
+        "VISION+SENSOR, steer 3-way": (fusion, Q3, STEER, LABELS, one),
+    })
+only = __import__("os").environ.get("EVAL_ONLY")
+if only:
+    runs = {k: v for k, v in runs.items() if only in k or k.startswith("6-way")}
 print("frames by label:", dict(collections.Counter(f["steer_gt"] for f in frames)))
 for name, args in runs.items():
     print(f"{name:34s}", *score(*args), flush=True)

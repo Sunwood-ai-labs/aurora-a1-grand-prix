@@ -1,0 +1,187 @@
+{
+ "summary": {
+  "mode": "fusion",
+  "timing": "realtime",
+  "camera": "cockpit",
+  "laps": 1,
+  "finished": false,
+  "position": 4,
+  "lap_times": [],
+  "race_time_s": 28.89,
+  "wall_time_s": 28.9,
+  "distance_m": 46.1,
+  "decisions": 15,
+  "model_decisions": 15,
+  "decision_rate_hz": 0.52,
+  "latency_ms_median": 140,
+  "latency_ms_p90": 145,
+  "decisions_on_grass_pct": 86.7
+ },
+ "decisions": [
+  {
+   "t": 2.15,
+   "kmh": 0,
+   "surface": 0,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.331,
+   "ms": 145,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 3.47,
+   "kmh": 0,
+   "surface": 0,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.312,
+   "ms": 120,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 7.79,
+   "kmh": 74,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.338,
+   "ms": 145,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 9.24,
+   "kmh": 0,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "BRAKE_ENTRY_LEFT",
+   "conf": 0.324,
+   "ms": 140,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 11.89,
+   "kmh": 0,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.313,
+   "ms": 144,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 13.25,
+   "kmh": 0,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.331,
+   "ms": 145,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 14.97,
+   "kmh": 0,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.309,
+   "ms": 119,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 16.47,
+   "kmh": 0,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.327,
+   "ms": 119,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 17.9,
+   "kmh": 0,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.307,
+   "ms": 119,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 19.74,
+   "kmh": 0,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.336,
+   "ms": 123,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 21.3,
+   "kmh": 0,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.311,
+   "ms": 142,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 22.67,
+   "kmh": 0,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.332,
+   "ms": 119,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 24.41,
+   "kmh": 0,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.353,
+   "ms": 119,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 25.74,
+   "kmh": 0,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.32,
+   "ms": 144,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 27.06,
+   "kmh": 0,
+   "surface": 2,
+   "mode": "fusion",
+   "timing": "realtime",
+   "pred": "GAS_STEER_LEFT",
+   "conf": 0.33,
+   "ms": 144,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  }
+ ]
+}

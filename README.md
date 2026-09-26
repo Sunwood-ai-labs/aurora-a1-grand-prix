@@ -55,7 +55,7 @@ AIエージェントが FreeCAD で設計した F1 コンセプトカー **AUROR
 | <kbd>↑</kbd> / <kbd>W</kbd> | アクセル |
 | <kbd>↓</kbd> / <kbd>S</kbd> | ブレーキ（止まった状態で押し続けるとバック） |
 | <kbd>←</kbd> <kbd>→</kbd> / <kbd>A</kbd> <kbd>D</kbd> | ハンドル |
-| <kbd>J</kbd> | **Jev-Omni AI パイロット切替**（`MANUAL` → `VISION` → `TEXT`） |
+| <kbd>J</kbd> | **Jev-Omni AI パイロット切替**（`MANUAL` → `VISION` → `SENSOR` → `V+S` → `TEXT`） |
 | <kbd>T</kbd> | Jev-Omni のタイミング切替（`REALTIME` ⇄ `STEP`＝判断を待つ間は時間停止） |
 | <kbd>C</kbd> | カメラ切り替え |
 | <kbd>R</kbd> | コースに戻る |
@@ -71,6 +71,8 @@ AIエージェントが FreeCAD で設計した F1 コンセプトカー **AUROR
 | 設定 | 内容 |
 | --- | --- |
 | **JEV-VISION**（デフォルト） | 3D 画面のキャプチャ（512×288 JPEG。HUD は含まない）と、メーターに出ている速度・ギアだけを入力。コースの座標や曲率は渡さない |
+| **JEV-SENSOR** | 距離センサーの値だけ（画像なし）。車から 7 方向（左 60°・30°・10°、正面、右 10°・30°・60°）に光線を出し、舗装路の端までの距離を測る LiDAR 風のセンサーと、左右のコース端までの距離。走行ラインや目標速度は含まない |
+| **JEV-V+S**（VISION+SENSOR） | 画面キャプチャ＋距離センサーの値 |
 | **JEV-TEXT** | ゲームが計算したコース情報（安全速度、走行ラインの方向、次のカーブ、路面）を文章で入力 |
 | **REALTIME**（デフォルト） | ゲームの時間は止めない。推論が返るまで車は直前の判断のまま走り続ける |
 | **STEP** | 判断が返るまでゲームの時間を止め、1 回の判断ごとに 0.2 秒だけ進める |
@@ -87,14 +89,14 @@ Google Colab A100 上の Jev-Omni で 1 周レースを録画しました（Cola
 | --- | --- | --- |
 | VISION・REALTIME | スタート直後にアクセルと「ブレーキ＋左」を繰り返し、左のバリアに当たって停止（走行 6 m） | [MP4](docs/videos/jev_vision_realtime.mp4) / [GIF](docs/images/jev_vision_realtime.gif) |
 | VISION・STEP | 同じ迷い方。ゲーム時間 3.7 秒でグリッド付近から動けず | [MP4](docs/videos/jev_vision_step.mp4) / [GIF](docs/images/jev_vision_step.gif) |
+| SENSOR・REALTIME | 1 コーナー手前で右のバリアに当たり、「アクセル＋左」（74.5%）を選び続けたまま動けず（走行 64 m） | [MP4](docs/videos/jev_sensor_realtime.mp4) / [GIF](docs/images/jev_sensor_realtime.gif) |
+| VISION+SENSOR・REALTIME | 画像付きで判断が遅く（0.5 Hz）、「アクセル＋左」寄りのままコース外で停止（走行 46 m） | [MP4](docs/videos/jev_fusion_realtime.mp4) / [GIF](docs/images/jev_fusion_realtime.gif) |
 | TEXT・REALTIME | コース情報を文章で渡しても 1 コーナー手前でコース外へ出て、`HARD_BRAKE` を選び続けて停止（走行 196 m） | [MP4](docs/videos/jev_text_realtime.mp4) / [GIF](docs/images/jev_text_realtime.gif) |
 
-<table>
-<tr>
-<td width="50%"><img src="docs/images/jev_vision_realtime.gif" alt="Jev-Omni VISION REALTIME"><br><sub><b>VISION・REALTIME</b>（2 倍速）：画面だけを見て判断</sub></td>
-<td width="50%"><img src="docs/images/jev_text_realtime.gif" alt="Jev-Omni TEXT REALTIME"><br><sub><b>TEXT・REALTIME</b>（2 倍速）：コース情報を文章で入力</sub></td>
-</tr>
-</table>
+<div align="center">
+<img src="docs/images/jev_compare.gif" width="960" alt="Jev-Omni 5 runs side by side">
+<br><sub>5 つの実行を並べたもの（2 倍速）。<a href="docs/videos/jev_compare.mp4">MP4（等速）</a></sub>
+</div>
 
 **なぜ画面から運転できないのか**：走行中のコックピット画面 62 枚（左カーブ 12・直線 25・右カーブ 25。正解はコース形状から計算し、採点だけに使用）で、Jev-Omni が道の向きを当てられるかを測りました（[`tools/eval_jev_prompts.py`](tools/eval_jev_prompts.py)）。
 
@@ -107,6 +109,16 @@ Google Colab A100 上の Jev-Omni で 1 周レースを録画しました（Cola
 | 3 通りの順番で確率を平均 | 39〜55% | 55% の方もほぼ常に「右」（常に「右」と答えるだけで 40%） |
 
 Jev-Omni は **選択肢の 1 番目を選ぶ傾向が強く**、このゲームの画面では道の向きをほとんど見分けられていません。順番を入れ替えて平均しても、偶然（33%）を大きく上回る結果にはなりませんでした。
+
+**距離センサーを足した場合**（センサー値付きで別に集めた 51 枚：左 9・直線 25・右 17。ゲームと同じ 6 択）：
+
+| 入力 | 正解率 | 左 / 直線 / 右 |
+| --- | --- | --- |
+| VISION（画面のみ） | 29% | 9/9・5/25・1/17 |
+| SENSOR（センサーのみ） | **57%** | 5/9・9/25・**15/17** |
+| VISION+SENSOR | 27% | 8/9・6/25・0/17 |
+
+センサーの値だけを渡すと左右をかなり見分けられるようになりますが、画像も一緒に渡すと答えは画像側（ほぼ「左」）に引っ張られ、センサーの値は使われませんでした。実際の走行でも、SENSOR は 1 コーナー手前でバリアに当たり、止まったあとは同じ判断を繰り返すだけでした。
 
 > 以前のバージョン（コミット `ca99b48`・`adab4f4`）の「P1 で優勝」という結果は、Jev-Omni の出力を内蔵 AI の走行ライン追従に小さく足していただけで、さらに Jev モードだけ車の性能（グリップ 1.22 倍・加速 1.25 倍・空気抵抗 0.62 倍）が上がっていました。そのため Jev-Omni の実力を示すものではなく、現在のバージョンでは補助と性能差を取り除いています。
 
@@ -126,7 +138,7 @@ wsl bash -c '~/.local/bin/colab exec -s jev-racer --timeout 900 -f /mnt/c/Prj/Au
 python tools/jev_bridge.py --port 8765 --colab-session jev-racer
 
 # 2b. 自動で 1 周走らせて MP4 / GIF / 判断ログを保存（--timing step で時間停止モード）
-python tools/run_jev_race.py --colab-session jev-racer --mode vision --timing realtime
+python tools/run_jev_race.py --colab-session jev-racer --mode vision --timing realtime   # --mode sensor / fusion / text
 
 # 3. 使い終わったら必ず止める（止めないと compute unit が減り続けます）
 wsl bash -c '~/.local/bin/colab stop -s jev-racer'
@@ -203,7 +215,7 @@ docs/jev_race_*.json         各走行の判断ログと集計（Colab A100 の�
 ブラウザのコンソールから `__aurora` を操作できます。README のスクリーンショットもこれを使い、ヘッドレス Chrome で撮影しました。
 
 ```js
-__aurora.jev('vision')   // Jev-Omni AI パイロット切り替え ('off' | 'vision' | 'text')
+__aurora.jev('vision')   // Jev-Omni AI パイロット切り替え ('off' | 'vision' | 'sensor' | 'fusion' | 'text')
 __aurora.timing('step')  // 'realtime' | 'step'
 __aurora.jevLog()        // Jev-Omni の判断ログ
 __aurora.probe()         // 評価用：モデルに渡す画像と、コース形状から計算した正解
