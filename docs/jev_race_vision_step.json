@@ -1,0 +1,220 @@
+{
+ "summary": {
+  "mode": "vision",
+  "timing": "step",
+  "camera": "cockpit",
+  "laps": 1,
+  "finished": false,
+  "position": 4,
+  "lap_times": [],
+  "race_time_s": 3.65,
+  "wall_time_s": 22.5,
+  "distance_m": -30.8,
+  "decisions": 18,
+  "model_decisions": 17,
+  "decision_rate_hz": 0.8,
+  "latency_ms_median": 110,
+  "latency_ms_p90": 134,
+  "decisions_on_grass_pct": 0.0
+ },
+ "decisions": [
+  {
+   "t": 0.02,
+   "kmh": 0,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "FULL_GAS_STRAIGHT",
+   "conf": 0.742,
+   "ms": 134,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 0.22,
+   "kmh": 9,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "BRAKE_ENTRY_LEFT",
+   "conf": 0.373,
+   "ms": 118,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 0.42,
+   "kmh": 3,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "BRAKE_ENTRY_LEFT",
+   "conf": 0.318,
+   "ms": 110,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 0.62,
+   "kmh": 3,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "BRAKE_ENTRY_LEFT",
+   "conf": 0.326,
+   "ms": 110,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 0.82,
+   "kmh": 3,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "BRAKE_ENTRY_LEFT",
+   "conf": 0.301,
+   "ms": 111,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 1.02,
+   "kmh": 3,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "FULL_GAS_STRAIGHT",
+   "conf": 0.255,
+   "ms": 110,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 1.22,
+   "kmh": 2,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "FULL_GAS_STRAIGHT",
+   "conf": 0.337,
+   "ms": 108,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 1.42,
+   "kmh": 11,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "BRAKE_ENTRY_LEFT",
+   "conf": 0.307,
+   "ms": 107,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 1.62,
+   "kmh": 11,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "FULL_GAS_STRAIGHT",
+   "conf": 0.278,
+   "ms": 108,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 1.82,
+   "kmh": 11,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "BRAKE_ENTRY_LEFT",
+   "conf": 0.316,
+   "ms": 107,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 2.02,
+   "kmh": 3,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "BRAKE_ENTRY_LEFT",
+   "conf": 0.271,
+   "ms": 107,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 2.22,
+   "kmh": 3,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "FULL_GAS_STRAIGHT",
+   "conf": 0.4,
+   "ms": 108,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 2.44,
+   "kmh": 12,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "FULL_GAS_STRAIGHT",
+   "conf": 0.371,
+   "ms": 107,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 2.64,
+   "kmh": 21,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "FULL_GAS_STRAIGHT",
+   "conf": 0.302,
+   "ms": 108,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 2.83,
+   "kmh": 20,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "BRAKE_ENTRY_LEFT",
+   "conf": 0.321,
+   "ms": 109,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 3.05,
+   "kmh": 3,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "FULL_GAS_STRAIGHT",
+   "conf": 0.815,
+   "ms": 5058,
+   "backend": "LOCAL FALLBACK (no model)"
+  },
+  {
+   "t": 3.26,
+   "kmh": 12,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "BRAKE_ENTRY_LEFT",
+   "conf": 0.279,
+   "ms": 130,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  },
+  {
+   "t": 3.46,
+   "kmh": 12,
+   "surface": 0,
+   "mode": "vision",
+   "timing": "step",
+   "pred": "FULL_GAS_STRAIGHT",
+   "conf": 0.355,
+   "ms": 131,
+   "backend": "Colab A100 (Jev-Omni 12B)"
+  }
+ ]
+}

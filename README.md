@@ -55,7 +55,8 @@ AIエージェントが FreeCAD で設計した F1 コンセプトカー **AUROR
 | <kbd>↑</kbd> / <kbd>W</kbd> | アクセル |
 | <kbd>↓</kbd> / <kbd>S</kbd> | ブレーキ（止まった状態で押し続けるとバック） |
 | <kbd>←</kbd> <kbd>→</kbd> / <kbd>A</kbd> <kbd>D</kbd> | ハンドル |
-| <kbd>J</kbd> | **Jev-Omni AI パイロット切替**（`MANUAL` → `TEXT 12B` → `VISION 12B`） |
+| <kbd>J</kbd> | **Jev-Omni AI パイロット切替**（`MANUAL` → `VISION` → `TEXT`） |
+| <kbd>T</kbd> | Jev-Omni のタイミング切替（`REALTIME` ⇄ `STEP`＝判断を待つ間は時間停止） |
 | <kbd>C</kbd> | カメラ切り替え |
 | <kbd>R</kbd> | コースに戻る |
 | <kbd>M</kbd> | サウンド オン / オフ |
@@ -63,39 +64,72 @@ AIエージェントが FreeCAD で設計した F1 コンセプトカー **AUROR
 
 ---
 
-## 🧠 Jev-Omni (Gemma 4 12B System-1) AI パイロットモード
+## 🧠 Jev-Omni AI パイロットモード（実験）
 
-オープンウェイトのマルチモーダル意思決定分類器 **[`akhilaaa3/Jev-Omni`](https://huggingface.co/akhilaaa3/Jev-Omni)**（Gemma 4 12B-IT ベース）と連携し、トークン生成を行わずに 1 回の Forward Pass で 6 つのドライビングアクション（`FULL_GAS_STRAIGHT` / `GAS_STEER_LEFT` / `GAS_STEER_RIGHT` / `BRAKE_ENTRY_LEFT` / `BRAKE_ENTRY_RIGHT` / `HARD_BRAKE`）の確率分布をリアルタイム推論して走行します。
+オープンウェイトのマルチモーダル意思決定分類器 **[`akhilaaa3/Jev-Omni`](https://huggingface.co/akhilaaa3/Jev-Omni)**（Gemma 4 12B-IT ベース）に車を運転させるモードです。Jev-Omni は文章を生成せず、1 回の Forward Pass で選択肢ごとの確率を返します。ゲームはその確率だけでハンドル・アクセル・ブレーキを決めます。
 
-<div align="center">
-<img src="docs/images/jev_gameplay.gif" width="640" alt="Jev-Omni Gameplay">
-</div>
+| 設定 | 内容 |
+| --- | --- |
+| **JEV-VISION**（デフォルト） | 3D 画面のキャプチャ（512×288 JPEG。HUD は含まない）と、メーターに出ている速度・ギアだけを入力。コースの座標や曲率は渡さない |
+| **JEV-TEXT** | ゲームが計算したコース情報（安全速度、走行ラインの方向、次のカーブ、路面）を文章で入力 |
+| **REALTIME**（デフォルト） | ゲームの時間は止めない。推論が返るまで車は直前の判断のまま走り続ける |
+| **STEP** | 判断が返るまでゲームの時間を止め、1 回の判断ごとに 0.2 秒だけ進める |
+
+- 操作は Jev-Omni の確率から直接計算します：ステア = Σ確率×(左 −1 / 右 +1)、アクセル／ブレーキ = Σ確率×(アクセル +1 / ブレーキ −1)。走行ラインへの補正や速度プロファイルの補助はありません。停止中のブレーキはバックになるため、AI のブレーキは前進中のみ効きます。
+- Jev-Omni モードでも車の性能は人間と同じです。
+- ブリッジ（`tools/jev_bridge.py`）がモデルにつながっていないとき（GitHub Pages など）は、ゲーム内のルールで走ります。このとき HUD には `LOCAL FALLBACK (no model)` と表示されます。
+
+### 結果：Jev-Omni はこのゲームを運転できませんでした
+
+Google Colab A100 上の Jev-Omni で 1 周レースを録画しました（Colab CLI の永続接続で推論 約 110 ms、画像付き往復で 1.5〜4 Hz）。
+
+| 実行 | 結果 | 動画 |
+| --- | --- | --- |
+| VISION・REALTIME | スタート直後にアクセルと「ブレーキ＋左」を繰り返し、左のバリアに当たって停止（走行 6 m） | [MP4](docs/videos/jev_vision_realtime.mp4) / [GIF](docs/images/jev_vision_realtime.gif) |
+| VISION・STEP | 同じ迷い方。ゲーム時間 3.7 秒でグリッド付近から動けず | [MP4](docs/videos/jev_vision_step.mp4) / [GIF](docs/images/jev_vision_step.gif) |
+| TEXT・REALTIME | コース情報を文章で渡しても 1 コーナー手前でコース外へ出て、`HARD_BRAKE` を選び続けて停止（走行 196 m） | [MP4](docs/videos/jev_text_realtime.mp4) / [GIF](docs/images/jev_text_realtime.gif) |
 
 <table>
 <tr>
-<td width="50%"><img src="docs/images/jev_cockpit_vision.png" alt="Jev-Omni Cockpit Vision"><br><sub><b>JEV-VISION（マルチモーダル推論）</b>：WebGL キャンバス画像＋テレメトリを Colab A100 上の Jev-Omni に入力（約 138 ms）</sub></td>
-<td width="50%"><img src="docs/images/jev_battle_lead.png" alt="Jev-Omni Battle"><br><sub><b>JEV-TEXT（テレメトリ高速推論）</b>：ヘアピン進入で先頭 NOVA のインを突きオーバーテイク（約 98 ms）</sub></td>
-</tr>
-<tr>
-<td><img src="docs/images/jev_far_cam.png" alt="Jev-Omni Lead"><br><sub><b>P1 独走体制</b>：6 選択肢のリアルタイム確率バーとレイテンシを左 HUD に表示</sub></td>
-<td><img src="docs/images/jev_result.png" alt="Jev-Omni Victory"><br><sub><b>VICTORY!</b>：P4 グリッドから全車オーバーテイクし 1:00.913 で優勝</sub></td>
+<td width="50%"><img src="docs/images/jev_vision_realtime.gif" alt="Jev-Omni VISION REALTIME"><br><sub><b>VISION・REALTIME</b>（2 倍速）：画面だけを見て判断</sub></td>
+<td width="50%"><img src="docs/images/jev_text_realtime.gif" alt="Jev-Omni TEXT REALTIME"><br><sub><b>TEXT・REALTIME</b>（2 倍速）：コース情報を文章で入力</sub></td>
 </tr>
 </table>
 
-### Google Colab ノートブック / ブリッジサーバーでの起動
+**なぜ画面から運転できないのか**：走行中のコックピット画面 62 枚（左カーブ 12・直線 25・右カーブ 25。正解はコース形状から計算し、採点だけに使用）で、Jev-Omni が道の向きを当てられるかを測りました（[`tools/eval_jev_prompts.py`](tools/eval_jev_prompts.py)）。
+
+| 質問と選択肢 | 正解率 | 左 / 直線 / 右 |
+| --- | --- | --- |
+| ゲームで使っている 6 択 | 21% | 7/12・6/25・0/25 |
+| 「どちらにハンドルを切る？」3 択 | 44% | 7/12・10/25・10/25 |
+| 「道はどちらに曲がっている？」3 択 | 19% | 12/12・0/25・0/25（常に 1 番目の「左」） |
+| 同じ質問で選択肢の順番を逆にしたもの | 40% | 0/12・0/25・25/25（常に 1 番目の「右」） |
+| 3 通りの順番で確率を平均 | 39〜55% | 55% の方もほぼ常に「右」（常に「右」と答えるだけで 40%） |
+
+Jev-Omni は **選択肢の 1 番目を選ぶ傾向が強く**、このゲームの画面では道の向きをほとんど見分けられていません。順番を入れ替えて平均しても、偶然（33%）を大きく上回る結果にはなりませんでした。
+
+> 以前のバージョン（コミット `ca99b48`・`adab4f4`）の「P1 で優勝」という結果は、Jev-Omni の出力を内蔵 AI の走行ライン追従に小さく足していただけで、さらに Jev モードだけ車の性能（グリップ 1.22 倍・加速 1.25 倍・空気抵抗 0.62 倍）が上がっていました。そのため Jev-Omni の実力を示すものではなく、現在のバージョンでは補助と性能差を取り除いています。
+
+### 自分で走らせる
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sunwood-ai-labs/aurora-a1-grand-prix/blob/main/notebooks/Jev_Omni_A100_Colab.ipynb)
 
-- **Colab ノートブック上で直接動かす場合**: [`notebooks/Jev_Omni_A100_Colab.ipynb`](notebooks/Jev_Omni_A100_Colab.ipynb) を開くと、本リポジトリを自動クローンし、Colab A100 GPU 上に `akhilaaa3/Jev-Omni` をロードしてインプロセス（約 98〜138 ms）の完全リアルタイム推論（時間を止めない 60FPS 動作）でレースを実行できます。
-- **ローカル PC から Google Colab CLI (`colab`) 経由で A100 に常時接続する場合**:
+- **Colab ノートブック**：[`notebooks/Jev_Omni_A100_Colab.ipynb`](notebooks/Jev_Omni_A100_Colab.ipynb) がこのリポジトリをクローンし、A100 に Jev-Omni をロードして、同じプロセス内のブリッジでゲームを表示します。
+- **ローカル PC から Google Colab CLI 経由**：
 
 ```bash
-# 1. Google Colab CLI (WSL2) で A100 セッションを作成し Jev-Omni を GPU にロード
+# 1. A100 セッションを作り、Jev-Omni をロード（約 100 秒・VRAM 約 24 GB）
 wsl bash -c '~/.local/bin/colab new --gpu A100 -s jev-racer'
-wsl bash -c '~/.local/bin/colab exec -s jev-racer --timeout 180 -f /mnt/c/Prj/Aurora_A1_Racer/tools/colab_init_jev.py'
+wsl bash -c '~/.local/bin/colab exec -s jev-racer --timeout 900 -f /mnt/c/Prj/Aurora_A1_Racer/tools/colab_init_jev.py'
 
-# 2. 永続 WebSocket ブリッジサーバーを起動（Colab セッション未指定時はローカル System-1 に自動フォールバック）
+# 2a. ブラウザで遊ぶ：ブリッジを起動して http://localhost:8765/ を開く
 python tools/jev_bridge.py --port 8765 --colab-session jev-racer
+
+# 2b. 自動で 1 周走らせて MP4 / GIF / 判断ログを保存（--timing step で時間停止モード）
+python tools/run_jev_race.py --colab-session jev-racer --mode vision --timing realtime
+
+# 3. 使い終わったら必ず止める（止めないと compute unit が減り続けます）
+wsl bash -c '~/.local/bin/colab stop -s jev-racer'
 ```
 
 ---
@@ -154,10 +188,14 @@ js/audio.js                  エンジン音などの合成（WebAudio）
 assets/aurora_a1.glb         FreeCAD から書き出した車のモデル
 tools/jev_bridge.py          Jev-Omni ローカル HTTP ブリッジ（Google Colab CLI A100 対応）
 tools/colab_init_jev.py      Colab A100 セッション上に Jev-Omni をロードする初期化スクリプト
-tools/run_jev_race.py        ヘッドレス Chrome + Colab A100 による自動レース＆テレメトリ記録
+tools/run_jev_race.py        ヘッドレス Chrome で Jev-Omni に 1 周走らせ、MP4 / GIF / 判断ログを保存
+tools/colab_worker.py        Colab セッションへの永続接続（ブリッジから起動）
+tools/collect_jev_eval.py    画面キャプチャと正解ラベル（評価用）の収集
+tools/eval_jev_prompts.py    Jev-Omni が画面から道の向きを読めるかの評価
 tools/export_glb.py          FreeCAD → GLB エクスポーター
 docs/images/                 スクリーンショット・Jev-Omni 走行 GIF
-docs/jev_omni_race_log.json  Colab A100 Jev-Omni の実推論ログ
+docs/videos/                 Jev-Omni 走行 MP4
+docs/jev_race_*.json         各走行の判断ログと集計（Colab A100 の実推論）
 ```
 
 ## 🧪 デバッグ
@@ -165,8 +203,10 @@ docs/jev_omni_race_log.json  Colab A100 Jev-Omni の実推論ログ
 ブラウザのコンソールから `__aurora` を操作できます。README のスクリーンショットもこれを使い、ヘッドレス Chrome で撮影しました。
 
 ```js
-__aurora.jev('vision')   // Jev-Omni AI パイロット切り替え ('off' | 'text' | 'vision')
-__aurora.telemetry()     // Jev-Omni 入力用テレメトリとプロンプトを取得
+__aurora.jev('vision')   // Jev-Omni AI パイロット切り替え ('off' | 'vision' | 'text')
+__aurora.timing('step')  // 'realtime' | 'step'
+__aurora.jevLog()        // Jev-Omni の判断ログ
+__aurora.probe()         // 評価用：モデルに渡す画像と、コース形状から計算した正解
 __aurora.run(10)         // シミュレーションを 10 秒進める
 __aurora.cam(2)          // カメラ切り替え（0: 追従, 1: 遠め, 2: コックピット, 3: 中継）
 __aurora.info()          // 速度・順位・ラップ・Jev-Omni 推論結果など

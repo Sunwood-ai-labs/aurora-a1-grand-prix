@@ -160,6 +160,7 @@ addEventListener('keydown', (e) => {
   if (e.repeat) return;
   if (e.code === 'KeyC') cycleCam();
   if (e.code === 'KeyJ') cycleJevMode();
+  if (e.code === 'KeyT') cycleJevTiming();
   if (e.code === 'KeyM') audio.toggle();
   if (e.code === 'KeyR' && state === 'race') resetToTrack(player);
   if (e.code === 'Escape' || e.code === 'KeyP') togglePause();
@@ -216,8 +217,8 @@ const audio = new Audio();
 let cars = [], player = null, template = null;
 let state = 'loading', raceTime = 0, countdown = 0, laps = 3, diff = 1, bestLap = Infinity;
 let lastLight = -1, msgTimer = 0;
-let jevMode = 'text'; // 'off' | 'text' | 'vision'
-const jevProfile = speedProfile(1.04);
+let jevMode = 'vision'; // 'off' | 'vision' (screen frames) | 'text' (course telemetry)
+const jevProfile = speedProfile(1.0);
 try { bestLap = parseFloat(localStorage.getItem('aurora_best') || 'Infinity'); } catch { /* storage unavailable */ }
 $('best').textContent = fmt(bestLap);
 
@@ -244,7 +245,8 @@ function buildCars() {
 function startRace() {
   buildCars();
   raceTime = 0; countdown = 0; lastLight = -1; state = 'countdown';
-  camMode = 0; $('cam').textContent = 'CAM: CHASE (C)';
+  camMode = jevMode === 'vision' ? CAMS.indexOf('COCKPIT') : 0; $('cam').textContent = `CAM: ${CAMS[camMode]} (C)`;
+  jevLog = []; jevBusy = false; jevTimer = 0;
   camYaw = player.yaw;
   $('title').classList.add('hidden'); $('result').classList.add('hidden'); $('hud').classList.remove('hidden');
   $('lights').classList.add('show');
@@ -277,19 +279,20 @@ function stepPlayer(car, dt, controls) {
   const right = new THREE.Vector3(-fwd.z, 0, fwd.x);
   let vF = car.vel.dot(fwd), vL = car.vel.dot(right);
   const surf = car.surface;              // 0 track, 1 kerb, 2 grass
-  const mu = (surf === 2 ? 0.55 : 1.0) * (jevMode !== 'off' ? 1.22 : 1.0);
+  const mu = surf === 2 ? 0.55 : 1.0;
 
   // longitudinal
   let a = 0;
-  if (controls.gas) a += (vF >= -0.5 ? engineAccel(vF) * (surf === 2 ? 0.6 : 1) : brakeAccel(0)) * (jevMode !== 'off' ? 1.25 : 1);
+  if (controls.gas) a += vF >= -0.5 ? engineAccel(vF) * (surf === 2 ? 0.6 : 1) : brakeAccel(0);
   if (controls.brake) a -= vF > 0.5 ? brakeAccel(vF) * (surf === 2 ? 0.5 : 1) : (vF > -12 ? 6 : 0);
-  a -= dragAccel(vF) * (jevMode !== 'off' ? 0.62 : 1) + Math.sign(vF) * (surf === 2 ? 0.02 * vF * vF + 3 : 0.35);
+  a -= dragAccel(vF) + Math.sign(vF) * (surf === 2 ? 0.02 * vF * vF + 3 : 0.35);
   if (!controls.gas && !controls.brake && Math.abs(vF) < 0.4) vF = 0;
   vF += a * dt;
-  vF = clamp(vF, -12, VMAX + (jevMode !== 'off' ? 12 : 3));
+  vF = clamp(vF, -12, VMAX + 3);
 
   // steering (speed-sensitive)
-  const target = (controls.right ? 1 : 0) - (controls.left ? 1 : 0);
+  // analog axis (-1..1) from the Jev-Omni pilot, otherwise digital keys
+  const target = controls.steerAxis ?? ((controls.right ? 1 : 0) - (controls.left ? 1 : 0));
   const maxSteer = 0.32 / (1 + Math.abs(vF) / 30);
   car.steer = lerp(car.steer, target * maxSteer, 1 - Math.exp(-dt * 7));
   let yawRate = vF * Math.tan(car.steer) / WHEELBASE;
@@ -495,27 +498,30 @@ function updateHUD() {
 }
 
 // ---------------------------------------------------------------- Jev-Omni System-1 AI
+// Each option is sent to Jev-Omni as plain language; the answer is mapped back by index.
+// steer: -1 left .. +1 right, lon: +1 throttle .. -1 brake
 const JEV_OPTIONS = [
-  { id: 'FULL_GAS_STRAIGHT', label: 'GAS + STRAIGHT' },
-  { id: 'GAS_STEER_LEFT',    label: 'GAS + LEFT' },
-  { id: 'GAS_STEER_RIGHT',   label: 'GAS + RIGHT' },
-  { id: 'BRAKE_ENTRY_LEFT',  label: 'BRAKE + LEFT' },
-  { id: 'BRAKE_ENTRY_RIGHT', label: 'BRAKE + RIGHT' },
-  { id: 'HARD_BRAKE',        label: 'HARD BRAKE' },
+  { id: 'FULL_GAS_STRAIGHT', label: 'GAS + STRAIGHT', text: 'Drive straight ahead at full throttle', steer: 0, lon: 1 },
+  { id: 'GAS_STEER_LEFT',    label: 'GAS + LEFT',     text: 'Steer left to follow the left curve', steer: -1, lon: 1 },
+  { id: 'GAS_STEER_RIGHT',   label: 'GAS + RIGHT',    text: 'Steer right to follow the right curve', steer: 1, lon: 1 },
+  { id: 'BRAKE_ENTRY_LEFT',  label: 'BRAKE + LEFT',   text: 'Brake and turn left into the sharp left corner', steer: -1, lon: -1 },
+  { id: 'BRAKE_ENTRY_RIGHT', label: 'BRAKE + RIGHT',  text: 'Brake and turn right into the sharp right corner', steer: 1, lon: -1 },
+  { id: 'HARD_BRAKE',        label: 'HARD BRAKE',     text: 'Brake hard because the car is about to leave the track', steer: 0, lon: -1 },
 ];
+const JEV_STEP_DT = 0.2;     // STEP mode: game seconds simulated per decision
 
+let jevTiming = 'realtime';  // 'realtime' (the clock never stops) | 'step' (the clock waits for each decision)
 let jevLastResult = {
   prediction: 'FULL_GAS_STRAIGHT',
-  confidence: 1.0,
-  probabilities: {
-    FULL_GAS_STRAIGHT: 0.85, GAS_STEER_LEFT: 0.06, GAS_STEER_RIGHT: 0.06,
-    BRAKE_ENTRY_LEFT: 0.01, BRAKE_ENTRY_RIGHT: 0.01, HARD_BRAKE: 0.01,
-  },
+  confidence: 0,
+  probabilities: {},
   latency_ms: 0,
   backend: 'READY',
   summary: '',
 };
-let jevBusy = false, jevTimer = 0, jevOverrideTimer = 0;
+let jevBusy = false, jevTimer = 0, jevLog = [], jevHz = 0, jevLastAt = 0;
+const jevFrame = document.createElement('canvas');
+jevFrame.width = 512; jevFrame.height = 288;
 
 function initJevHUD() {
   const bars = $('jev-bars');
@@ -530,139 +536,117 @@ function initJevHUD() {
 }
 
 function cycleJevMode() {
-  const order = ['off', 'text', 'vision'];
+  const order = ['off', 'vision', 'text'];
   jevMode = order[(order.indexOf(jevMode) + 1) % order.length];
   if (player) player.name = jevMode === 'off' ? 'YOU' : 'JEV-OMNI';
   showMsg(`JEV-OMNI: ${jevMode.toUpperCase()}`, 1.2);
   updateJevHUD();
 }
 
-function computeJevTelemetry(car) {
+function cycleJevTiming() {
+  jevTiming = jevTiming === 'realtime' ? 'step' : 'realtime';
+  showMsg(`JEV TIMING: ${jevTiming.toUpperCase()}`, 1.2);
+  updateJevHUD();
+}
+
+// course telemetry computed by the game (TEXT mode input and the offline fallback only)
+function courseTelemetry(car) {
   const i = Math.floor(car.s / track.ds) % track.n;
-  const iAhead = (i + 8) % track.n;
-  const vt = jevProfile[iAhead] * 1.06;
+  const vt = jevProfile[(i + 8) % track.n];
   const p = track.frameAt(car.s + 12 + car.v * 0.3);
-  let laneWant = track.line[p.i] * 0.55;
-  let rivalInfo = 'Clear track ahead';
-  for (const o of cars) {
-    if (o === car) continue;
-    const gap = wrapDelta(o.s - car.s);
-    if (gap > -2 && gap < 28 && Math.abs(o.d - laneWant) < 2.3) {
-      laneWant = o.d > 0 ? Math.max(-track.halfW + 2.4, o.d - 3.0) : Math.min(track.halfW - 2.4, o.d + 3.0);
-      rivalInfo = `Rival ${o.name} ${Math.max(0, gap).toFixed(0)}m ahead (d=${o.d.toFixed(1)}m)`;
-    }
-  }
-  const target = p.pos.clone().addScaledVector(p.right, laneWant);
-  const toT = target.sub(car.pos);
-  const wantYaw = Math.atan2(toT.x, toT.z);
-  const errRad = wrapAngle(wantYaw - car.yaw);
-  const errDeg = errRad * (180 / Math.PI);
-  const c25 = track.curvS[(i + 12) % track.n];
-  const curveStr = Math.abs(c25) < 0.0025 ? 'STRAIGHT' : c25 > 0.007 ? 'SHARP RIGHT' : c25 > 0 ? 'RIGHT' : c25 < -0.007 ? 'SHARP LEFT' : 'LEFT';
-  const surfNames = ['ASPHALT', 'KERB', 'GRASS'];
-  const kmh = Math.round(car.v * 3.6), targetKmh = Math.round(vt * 3.6);
-  const stateText = `Speed: ${kmh} km/h (Optimal ahead: ${targetKmh} km/h). Offset: ${car.d.toFixed(1)}m (Target lane: ${laneWant.toFixed(1)}m). Heading error: ${errDeg.toFixed(1)} deg (${errDeg > 1.8 ? 'steer LEFT' : errDeg < -1.8 ? 'steer RIGHT' : 'on target'}). Upcoming: ${curveStr}. Surface: ${surfNames[car.surface || 0]}. ${rivalInfo}.`;
-  const question = 'Select the optimal immediate driving action for the F1 car to follow the racing line and maximize speed:';
-  return { kmh, targetKmh, vt, laneWant, errRad, errDeg, curveStr, rivalInfo, stateText, question, options: JEV_OPTIONS.map((o) => o.id) };
+  const target = p.pos.clone().addScaledVector(p.right, track.line[p.i] * 0.55).sub(car.pos);
+  const errRad = wrapAngle(Math.atan2(target.x, target.z) - car.yaw);
+  const c = track.curvS[(i + 12) % track.n];
+  const curve = Math.abs(c) < 0.0025 ? 'straight' : c > 0.007 ? 'sharp right' : c > 0 ? 'right' : c < -0.007 ? 'sharp left' : 'left';
+  return { vt, errRad, curve };
 }
 
-function localCalibratedJev(tel) {
-  const dv = (tel.kmh - tel.targetKmh) / 3.6;
-  const e = tel.errRad;
-  const needBrake = dv > 2.2;
-  const needHardBrake = dv > 9.5;
-  const logits = {
-    FULL_GAS_STRAIGHT: (!needBrake ? 2.6 : -2.0) - Math.abs(e) * 18,
-    GAS_STEER_LEFT:    (!needBrake ? 2.2 : -1.5) + (e > 0.018 ? e * 22 : -2.5),
-    GAS_STEER_RIGHT:   (!needBrake ? 2.2 : -1.5) + (e < -0.018 ? -e * 22 : -2.5),
-    BRAKE_ENTRY_LEFT:  (needBrake ? 2.4 : -2.2) + (e > 0.015 ? e * 20 : -2.0),
-    BRAKE_ENTRY_RIGHT: (needBrake ? 2.4 : -2.2) + (e < -0.015 ? -e * 20 : -2.0),
-    HARD_BRAKE:        (needHardBrake ? 3.0 : needBrake ? 1.2 : -3.0) - Math.abs(e) * 8,
+// What the model is given. VISION: the rendered 3D frame (the HUD is DOM, so it is not in the canvas)
+// plus the speed/gear a driver reads off the dashboard. TEXT: course telemetry computed by the game.
+function buildJevInput(car) {
+  const kmh = Math.round(car.v * 3.6), g = gearOf(car.v);
+  const question = 'What should the driver do right now to stay on the track and drive fast?';
+  const options = JEV_OPTIONS.map((o) => o.text);
+  if (jevMode === 'vision') {
+    jevFrame.getContext('2d').drawImage(canvas, 0, 0, jevFrame.width, jevFrame.height);
+    return {
+      state: `${CAMS[camMode].toLowerCase()} camera view of your F1 race car on an asphalt circuit. Speed: ${kmh} km/h, gear ${g}.`,
+      question, options, modality: 'image', image_base64: jevFrame.toDataURL('image/jpeg', 0.8),
+    };
+  }
+  const t = courseTelemetry(car), errDeg = t.errRad * (180 / Math.PI);
+  return {
+    state: `Speed: ${kmh} km/h (safe speed ahead: ${Math.round(t.vt * 3.6)} km/h). Racing line is ${Math.abs(errDeg).toFixed(1)} deg to the ${errDeg > 0 ? 'left' : 'right'}. Upcoming: ${t.curve}. Surface: ${['asphalt', 'kerb', 'grass'][car.surface || 0]}.`,
+    question, options, modality: 'text',
   };
-  const maxL = Math.max(...Object.values(logits));
-  const exps = {};
-  let sum = 0;
-  for (const k of Object.keys(logits)) { exps[k] = Math.exp(logits[k] - maxL); sum += exps[k]; }
-  const probabilities = {};
-  let bestK = 'FULL_GAS_STRAIGHT', bestP = -1;
-  for (const k of Object.keys(exps)) {
-    probabilities[k] = exps[k] / sum;
-    if (probabilities[k] > bestP) { bestP = probabilities[k]; bestK = k; }
-  }
-  return { prediction: bestK, confidence: bestP, probabilities };
 }
 
-async function pollJevBridge(tel) {
-  if (jevBusy || jevOverrideTimer > 0) return;
+// offline fallback (e.g. GitHub Pages without the bridge): a hand-tuned rule on course telemetry, not the model
+function localFallbackJev(car) {
+  const { vt, errRad: e } = courseTelemetry(car);
+  const over = car.v - vt > 2;
+  const logits = JEV_OPTIONS.map((o) => (o.lon > 0 ? (over ? -2 : 2.4) : (over ? 2.4 : -2.4)) +
+    (o.steer === 0 ? -Math.abs(e) * 18 : (Math.abs(e) > 0.018 && Math.sign(e) === -o.steer ? Math.abs(e) * 22 : -2.5)));
+  const m = Math.max(...logits), ex = logits.map((l) => Math.exp(l - m)), sum = ex.reduce((a, b) => a + b, 0);
+  return ex.map((x) => x / sum);
+}
+
+function applyJevProbs(probs, latency, backend) {
+  const probabilities = {};
+  let best = 0;
+  JEV_OPTIONS.forEach((o, k) => { probabilities[o.id] = probs[k] || 0; if (probs[k] > probs[best]) best = k; });
+  jevLastResult = {
+    prediction: JEV_OPTIONS[best].id, confidence: probs[best], probabilities,
+    latency_ms: Math.round(latency), backend, summary: JEV_OPTIONS[best].text,
+  };
+  const now = performance.now();
+  if (jevLastAt) jevHz = lerp(jevHz, 1000 / Math.max(1, now - jevLastAt), 0.3);
+  jevLastAt = now;
+  jevLog.push({ t: +raceTime.toFixed(2), kmh: Math.round(player.v * 3.6), surface: player.surface, mode: jevMode, timing: jevTiming,
+    pred: jevLastResult.prediction, conf: +probs[best].toFixed(3), ms: jevLastResult.latency_ms, backend });
+  updateJevHUD();
+}
+
+async function pollJev(car) {
   jevBusy = true;
   const t0 = performance.now();
+  const inp = buildJevInput(car);
   try {
-    const payload = {
-      state: tel.stateText,
-      question: tel.question,
-      options: tel.options,
-      modality: jevMode === 'vision' ? 'image' : 'text',
-    };
-    if (jevMode === 'vision') {
-      payload.image_base64 = canvas.toDataURL('image/jpeg', 0.55);
-    }
     const resp = await fetch('/api/jev/decide', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(2500),
+      body: JSON.stringify(inp),
+      signal: AbortSignal.timeout(5000),
     });
-    if (resp.ok) {
-      const data = await resp.json();
-      jevLastResult = {
-        prediction: data.prediction,
-        confidence: data.confidence,
-        probabilities: data.probabilities,
-        latency_ms: data.latency_ms ?? Math.round(performance.now() - t0),
-        backend: data.backend || 'A100 JEV-OMNI',
-        summary: `${tel.curveStr} | Tgt ${tel.targetKmh}km/h | Err ${tel.errDeg > 0 ? '+' : ''}${tel.errDeg.toFixed(1)}°`,
-      };
-      updateJevHUD();
+    const data = resp.ok ? await resp.json() : null;
+    if (data && data.probabilities) {
+      applyJevProbs(inp.options.map((t) => data.probabilities[t] ?? 0), data.latency_ms ?? performance.now() - t0, data.backend || 'JEV-OMNI');
       jevBusy = false;
       return;
     }
-  } catch { /* fallback to calibrated model when standalone (e.g. GitHub Pages) */ }
-  const loc = localCalibratedJev(tel);
-  jevLastResult = {
-    ...loc,
-    latency_ms: Math.round(performance.now() - t0) || 1,
-    backend: 'LOCAL SYSTEM-1',
-    summary: `${tel.curveStr} | Tgt ${tel.targetKmh}km/h | Err ${tel.errDeg > 0 ? '+' : ''}${tel.errDeg.toFixed(1)}°`,
-  };
+  } catch { /* no bridge: standalone page */ }
+  applyJevProbs(localFallbackJev(car), performance.now() - t0, 'LOCAL FALLBACK (no model)');
   jevBusy = false;
 }
 
+// The car is driven only by Jev-Omni's probability distribution: no racing-line or speed-profile assist.
 function stepJevAutopilot(car, ctl, dt) {
-  const tel = computeJevTelemetry(car);
-  if (jevOverrideTimer > 0) jevOverrideTimer = Math.max(0, jevOverrideTimer - dt);
   jevTimer -= dt;
-  if (jevTimer <= 0 && !jevBusy) {
-    jevTimer = jevMode === 'vision' ? 0.08 : 0.04;
-    if (jevOverrideTimer <= 0) {
-      pollJevBridge(tel);
-    }
+  if (!jevBusy && jevTimer <= 0) {
+    jevTimer = jevTiming === 'step' ? JEV_STEP_DT : 0;
+    pollJev(car);
   }
-  jevLastResult.summary = `${tel.curveStr} | Tgt ${tel.targetKmh}km/h | Err ${tel.errDeg > 0 ? '+' : ''}${tel.errDeg.toFixed(1)}°`;
+  const p = jevLastResult.probabilities;
+  let steer = 0, lon = 0;
+  for (const o of JEV_OPTIONS) { steer += (p[o.id] || 0) * o.steer; lon += (p[o.id] || 0) * o.lon; }
+  ctl.steerAxis = clamp(steer * 1.5, -1, 1);
+  ctl.gas = lon > 0.1;
+  ctl.brake = lon < -0.1 && car.v > 1;   // braking at a standstill would engage reverse
+}
 
-  const p = jevLastResult.probabilities || {};
-  const pGas = (p.FULL_GAS_STRAIGHT || 0) + (p.GAS_STEER_LEFT || 0) + (p.GAS_STEER_RIGHT || 0);
-  const pBrk = (p.HARD_BRAKE || 0) + (p.BRAKE_ENTRY_LEFT || 0) + (p.BRAKE_ENTRY_RIGHT || 0);
-  const pLeft = (p.GAS_STEER_LEFT || 0) + (p.BRAKE_ENTRY_LEFT || 0);
-  const pRight = (p.GAS_STEER_RIGHT || 0) + (p.BRAKE_ENTRY_RIGHT || 0);
-
-  const speedBias = 1.0 + (pGas - pBrk) * 0.04;
-  const vTarget = tel.vt * speedBias;
-  ctl.gas = car.v < vTarget * 0.99;
-  ctl.brake = car.v > vTarget * 1.03 || ((p.HARD_BRAKE || 0) > 0.6 && car.v > tel.vt * 0.92);
-  const steerBias = (pLeft - pRight) * 0.008;
-  const effErr = tel.errRad + steerBias;
-  ctl.left = effErr > 0.02;
-  ctl.right = effErr < -0.02;
+// STEP mode: hold the simulation clock while a decision is in flight
+function jevHoldsClock() {
+  return jevMode !== 'off' && jevTiming === 'step' && state === 'race' && jevBusy;
 }
 
 function updateJevHUD() {
@@ -673,20 +657,19 @@ function updateJevHUD() {
     badge.className = 'badge';
     meta.innerHTML = 'Press <kbd>J</kbd> to activate Jev-Omni AI';
   } else {
-    badge.textContent = jevMode === 'vision' ? 'VISION 12B (J)' : 'TEXT 12B (J)';
+    badge.textContent = `${jevMode === 'vision' ? 'VISION' : 'TEXT'} · ${jevTiming === 'step' ? 'STEP' : 'REALTIME'}`;
     badge.className = 'badge ' + jevMode;
-    meta.innerHTML = `<span>${jevLastResult.backend}</span><span>${jevLastResult.latency_ms} ms</span>`;
+    meta.innerHTML = `<span>${jevLastResult.backend}</span><span>${jevLastResult.latency_ms} ms · ${jevHz.toFixed(1)} Hz</span>`;
   }
   const probs = jevLastResult.probabilities || {};
   for (const o of JEV_OPTIONS) {
-    const prob = clamp(probs[o.id] || 0, 0, 1);
-    const pct = Math.round(prob * 100);
+    const pct = Math.round(clamp(probs[o.id] || 0, 0, 1) * 100);
     const row = $(`jrow-${o.id}`), bar = $(`jbar-${o.id}`), txt = $(`jpct-${o.id}`);
     if (row) row.classList.toggle('top', jevLastResult.prediction === o.id && jevMode !== 'off');
     if (bar) bar.style.width = `${pct}%`;
     if (txt) txt.textContent = `${pct}%`;
   }
-  if (st) st.textContent = jevLastResult.summary || 'Waiting for race start...';
+  if (st) st.textContent = jevMode === 'off' ? '' : (jevLastResult.summary || 'Waiting for race start...');
 }
 
 // ---------------------------------------------------------------- main loop
@@ -709,6 +692,7 @@ function tick(dt, draw = true) {
     renderer.render(scene, camera);
     return;
   }
+  if (jevHoldsClock()) { renderer.render(scene, camera); return; }   // STEP mode: time waits for Jev-Omni
   if (state !== 'paused') {
     const SUB = 4, h = dt / SUB;
     if (state === 'countdown') {
@@ -777,6 +761,7 @@ for (const seg of document.querySelectorAll('.seg')) {
     if (seg.dataset.opt === 'laps') laps = +b.dataset.v;
     else if (seg.dataset.opt === 'diff') diff = +b.dataset.v;
     else if (seg.dataset.opt === 'jev') jevMode = b.dataset.v;
+    else if (seg.dataset.opt === 'timing') jevTiming = b.dataset.v;
   });
 }
 $('start').onclick = () => { startDelay = Math.random() * 1.2; startRace(); };
@@ -818,22 +803,21 @@ window.__aurora = {
   cam: (i) => { camMode = (i + CAMS.length - 1) % CAMS.length; cycleCam(); },
   auto: (on, skill = 0.9) => { debugAuto = on ? speedProfile(skill) : null; },
   jev: (mode = 'text') => { jevMode = mode; if (player) player.name = mode === 'off' ? 'YOU' : 'JEV-OMNI'; initJevHUD(); return jevMode; },
-  telemetry: () => player ? computeJevTelemetry(player) : null,
-  applyJev: (res) => {
-    jevOverrideTimer = 0.25;
-    const tel = player ? computeJevTelemetry(player) : null;
-    jevLastResult = {
-      ...jevLastResult,
-      ...res,
-      summary: res.summary || (tel ? `${tel.curveStr} | Tgt ${tel.targetKmh}km/h | Err ${tel.errDeg > 0 ? '+' : ''}${tel.errDeg.toFixed(1)}°` : ''),
-    };
-    updateJevHUD();
+  timing: (t) => { if (t) jevTiming = t; updateJevHUD(); return jevTiming; },
+  jevLog: () => jevLog,
+  // evaluation only: the frame the model would see plus ground truth from the course (never sent to the model)
+  probe: () => {
+    const m = jevMode; jevMode = 'vision'; const inp = buildJevInput(player); jevMode = m;
+    const t = courseTelemetry(player);
+    return { img: inp.image_base64, kmh: Math.round(player.v * 3.6), vtKmh: Math.round(t.vt * 3.6), errDeg: +(t.errRad * 180 / Math.PI).toFixed(2), curve: t.curve, surface: player.surface };
   },
   start: (opts = {}) => {
     if (opts.laps) laps = opts.laps;
     if (opts.diff !== undefined) diff = opts.diff;
     if (opts.jev) jevMode = opts.jev;
+    if (opts.timing) jevTiming = opts.timing;
     startDelay = 0;
     startRace();
+    if (opts.cam !== undefined) { camMode = (opts.cam + CAMS.length - 1) % CAMS.length; cycleCam(); }
   },
 };
