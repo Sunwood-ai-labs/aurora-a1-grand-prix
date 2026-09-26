@@ -1,79 +1,29 @@
 #!/usr/bin/env python3
 """
-Automated Jev-Omni Race Runner & Screenshot/GIF Recorder for AURORA A1 Grand Prix.
-Launches headless Chrome with WebGL, runs a full race controlled by Jev-Omni
-(bridged to Google Colab A100 session 'jev-racer'), and captures screenshots + telemetry log.
+Real-Time Jev-Omni Race Runner & Screenshot/GIF Recorder for AURORA A1 Grand Prix.
+Launches the Jev-Omni Bridge Server (tools/jev_bridge.py) and headless Chrome with WebGL.
+Runs a 100% real-time race (60 FPS requestAnimationFrame, NEVER freezing or stepping time)
+where the browser continuously queries /api/jev/decide in real time.
 """
+import argparse
 import asyncio
 import base64
 import json
-import os
 import subprocess
 import sys
-import threading
 import time
 import urllib.request
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import websockets
 from PIL import Image
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR / "tools"))
+import jev_bridge
+
 IMG_DIR = ROOT_DIR / "docs" / "images"
 CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-COLAB_SESSION = "jev-racer"
-
-
-class QuietHandler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(ROOT_DIR), **kwargs)
-
-    def log_message(self, fmt, *args):
-        pass
-
-
-def start_static_server(port: int = 8766):
-    server = ThreadingHTTPServer(("127.0.0.1", port), QuietHandler)
-    t = threading.Thread(target=server.serve_forever, daemon=True)
-    t.start()
-    return server
-
-
-def run_colab_jev_inference(telemetry_item: dict) -> dict | None:
-    """Send telemetry state (and optional frame image) to Google Colab A100 Jev-Omni."""
-    b64_req = base64.b64encode(json.dumps(telemetry_item).encode("utf-8")).decode("ascii")
-    py_code = (
-        "import base64, json, time\n"
-        f"_item = json.loads(base64.b64decode('{b64_req}').decode('utf-8'))\n"
-        "_t0 = time.time()\n"
-        "_kw = {'state': _item['state'], 'question': _item['question'], 'options': _item['options']}\n"
-        "if _item.get('modality') == 'image' and _item.get('image_b64'):\n"
-        "    open('/content/race_frame.jpg', 'wb').write(base64.b64decode(_item['image_b64']))\n"
-        "    _kw['media'] = '/content/race_frame.jpg'\n"
-        "    _kw['modality'] = 'image'\n"
-        "_res = classifier.predict(**_kw)\n"
-        "_res['latency_ms'] = round((time.time() - _t0) * 1000, 1)\n"
-        "_res['backend'] = 'Colab A100 (Jev-Omni 12B)'\n"
-        "print('JEV_OUT:' + json.dumps(_res))\n"
-    )
-    try:
-        proc = subprocess.run(
-            ["wsl", "bash", "-c", f"~/.local/bin/colab exec -s {COLAB_SESSION} --timeout 60"],
-            input=py_code,
-            text=True,
-            capture_output=True,
-            timeout=45,
-        )
-        if proc.returncode == 0:
-            for line in proc.stdout.splitlines():
-                if "JEV_OUT:" in line:
-                    return json.loads(line.split("JEV_OUT:", 1)[1].strip())
-        else:
-            print(f"[warn] colab exec rc={proc.returncode}: {proc.stderr[:200]}")
-    except Exception as e:
-        print(f"[warn] colab exec exception: {e}")
-    return None
 
 
 class CDPClient:
@@ -104,16 +54,16 @@ class CDPClient:
         path.write_bytes(img_bytes)
         return img_bytes
 
-    async def screenshot_jpeg_b64(self, quality: int = 65) -> str:
-        res = await self.send("Page.captureScreenshot", {"format": "jpeg", "quality": quality})
-        return res["data"]
-
 
 async def main():
+    parser = argparse.ArgumentParser(description="Run a 100% real-time AURORA A1 race with Jev-Omni")
+    parser.add_argument("--colab-session", type=str, default=None, help="Active Google Colab session name (e.g. jev-racer)")
+    parser.add_argument("--port", type=int, default=8766, help="Local bridge port")
+    args = parser.parse_args()
+
     IMG_DIR.mkdir(parents=True, exist_ok=True)
-    port = 8766
-    start_static_server(port)
-    print(f"[*] Local game server listening on http://127.0.0.1:{port}/")
+    jev_bridge.start_background_server(port=args.port, colab_session=args.colab_session)
+    print(f"[*] Real-Time Jev-Omni Bridge Server listening on http://127.0.0.1:{args.port}/")
 
     chrome_proc = subprocess.Popen([
         CHROME_PATH,
@@ -124,11 +74,12 @@ async def main():
         "--enable-webgl",
         "--ignore-gpu-blocklist",
         "--mute-audio",
-        f"http://127.0.0.1:{port}/",
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        f"http://127.0.0.1:{args.port}/",
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     try:
-        # Wait for CDP endpoint
         ws_url = None
         for _ in range(30):
             time.sleep(0.4)
@@ -159,98 +110,79 @@ async def main():
                     break
                 await asyncio.sleep(0.3)
 
-            await asyncio.sleep(0.5)
-            await cdp.eval("window.__aurora.freeze(true)")
-            await cdp.eval("window.__aurora.run(0.1)")
+            await asyncio.sleep(0.6)
             await cdp.screenshot(IMG_DIR / "jev_title.png")
             print("[✓] Saved docs/images/jev_title.png")
 
-            # Start 1-lap race with JEV-OMNI
+            # Start 1-lap race in 100% REAL TIME (no freeze, requestAnimationFrame runs continuously at 60 FPS)
             await cdp.eval("window.__aurora.start({ laps: 1, diff: 1, jev: 'text' })")
-            # Advance past countdown (5.4s)
-            await cdp.eval("window.__aurora.run(5.4)")
+            print("[*] Race started in real-time (60 FPS, frozen=false)...")
 
+            # Wait for 5-light start sequence in real time
+            while True:
+                info = await cdp.eval("window.__aurora.info()")
+                if info["state"] == "race":
+                    break
+                await asyncio.sleep(0.1)
+
+            checkpoints = [
+                {"t": 4.0,  "mode": "text",   "cam": 0, "snap": "jev_start_straight.png", "desc": "Opening Straight & Launch"},
+                {"t": 10.8, "mode": "text",   "cam": 0, "snap": "jev_corner_entry.png",   "desc": "Turn 1 Braking & Overtake"},
+                {"t": 19.2, "mode": "vision", "cam": 2, "snap": "jev_cockpit_vision.png", "desc": "Cockpit Vision Multimodal Decision"},
+                {"t": 29.6, "mode": "text",   "cam": 0, "snap": "jev_battle_lead.png",    "desc": "Mid-Sector High-Speed S-Curves"},
+                {"t": 42.1, "mode": "vision", "cam": 1, "snap": "jev_far_cam.png",        "desc": "Far Chase Cam Vision Decision"},
+            ]
+            next_cp = 0
             decision_logs = []
             gif_frames = []
+            last_gif_t = 0.0
 
-            # Run the race step-by-step and query Colab A100 Jev-Omni at key checkpoints
-            checkpoints = [
-                {"dt": 3.5,  "mode": "text",   "cam": 0, "snap": "jev_start_straight.png", "desc": "Opening Straight & Launch"},
-                {"dt": 6.5,  "mode": "text",   "cam": 0, "snap": "jev_corner_entry.png",   "desc": "Turn 1 Braking & Overtake"},
-                {"dt": 8.0,  "mode": "vision", "cam": 2, "snap": "jev_cockpit_vision.png", "desc": "Cockpit Vision Multimodal Decision"},
-                {"dt": 10.0, "mode": "text",   "cam": 0, "snap": "jev_battle_lead.png",    "desc": "Mid-Sector High-Speed S-Curves"},
-                {"dt": 12.0, "mode": "vision", "cam": 1, "snap": "jev_far_cam.png",        "desc": "Far Chase Cam Vision Decision"},
-            ]
-
-            cached_a100 = []
-            log_path = ROOT_DIR / "docs" / "jev_omni_race_log.json"
-            if log_path.exists():
-                try:
-                    cached_a100 = [c.get("jev_omni_result") for c in json.loads(log_path.read_text(encoding="utf-8")).get("checkpoints", [])]
-                except Exception:
-                    cached_a100 = []
-
-            for idx, cp in enumerate(checkpoints):
-                # Advance simulation in 0.5s increments to record smooth GIF frames
-                steps = int(cp["dt"] / 0.5)
-                for s in range(steps):
-                    await cdp.eval("window.__aurora.run(0.5)")
-                    if s % 2 == 0:
-                        png_bytes = await cdp.screenshot(IMG_DIR / "_tmp.png")
-                        im = Image.open(IMG_DIR / "_tmp.png").resize((640, 360), Image.Resampling.LANCZOS)
-                        gif_frames.append(im)
-
-                await cdp.eval(f"window.__aurora.jev('{cp['mode']}')")
-                await cdp.eval(f"window.__aurora.cam({cp['cam']})")
-                await cdp.eval("window.__aurora.run(0.05)")
-
-                tel = await cdp.eval("window.__aurora.telemetry()")
+            # Real-time monitoring loop (never freezes or steps simulation clock)
+            while True:
                 info = await cdp.eval("window.__aurora.info()")
+                rt = info["raceTime"]
 
-                req_item = {
-                    "state": tel["stateText"],
-                    "question": tel["question"],
-                    "options": tel["options"],
-                    "modality": "image" if cp["mode"] == "vision" else "text",
-                }
-                if cp["mode"] == "vision":
-                    req_item["image_b64"] = await cdp.screenshot_jpeg_b64(65)
+                if info["state"] == "finished":
+                    break
 
-                print(f"[*] Querying Colab A100 Jev-Omni for Checkpoint {idx+1}: {cp['desc']} ({cp['mode'].upper()})...")
-                a100_res = cached_a100[idx] if idx < len(cached_a100) and cached_a100[idx] else run_colab_jev_inference(req_item)
-                if a100_res:
-                    print(f"    -> A100 Decision: {a100_res['prediction']} ({a100_res['confidence']*100:.1f}%) in {a100_res['latency_ms']} ms")
-                    await cdp.eval(f"window.__aurora.applyJev({json.dumps(a100_res)})")
+                if rt - last_gif_t >= 1.2 and rt < 45.0:
+                    last_gif_t = rt
+                    await cdp.screenshot(IMG_DIR / "_tmp.png")
+                    im = Image.open(IMG_DIR / "_tmp.png").resize((640, 360), Image.Resampling.LANCZOS)
+                    gif_frames.append(im)
+
+                if next_cp < len(checkpoints) and rt >= checkpoints[next_cp]["t"] - 0.6:
+                    cp = checkpoints[next_cp]
+                    await cdp.eval(f"window.__aurora.jev('{cp['mode']}')")
+                    await cdp.eval(f"window.__aurora.cam({cp['cam']})")
+                    # Wait 0.6s in real time so the browser's live /api/jev/decide poll completes in the new mode/camera
+                    await asyncio.sleep(0.6)
+                    info = await cdp.eval("window.__aurora.info()")
+                    tel = await cdp.eval("window.__aurora.telemetry()")
+                    await cdp.screenshot(IMG_DIR / cp["snap"])
+                    res = info.get("jevLastResult", {})
+                    print(f"[✓] Real-Time Checkpoint {next_cp+1} ({rt:.1f}s): {res.get('prediction')} ({res.get('confidence', 0)*100:.1f}%) | {res.get('latency_ms')} ms -> {cp['snap']}")
                     decision_logs.append({
                         "checkpoint": cp["desc"],
                         "mode": cp["mode"],
                         "raceTime": info["raceTime"],
                         "speed_kmh": info["v"],
                         "position": info["pos"],
-                        "telemetry_state": tel["stateText"],
-                        "jev_omni_result": a100_res,
+                        "telemetry_state": tel["stateText"] if tel else "",
+                        "jev_omni_result": res,
                     })
-                else:
-                    print("    -> Used local calibrated fallback")
+                    # Return to CHASE + TEXT for next sector
+                    await cdp.eval("window.__aurora.cam(0)")
+                    await cdp.eval("window.__aurora.jev('text')")
+                    next_cp += 1
 
-                await cdp.eval("window.__aurora.run(0.05)")
-                await cdp.screenshot(IMG_DIR / cp["snap"])
-                print(f"[✓] Saved docs/images/{cp['snap']}")
+                await asyncio.sleep(0.1)
 
-            # Switch back to Chase cam and finish the lap!
-            await cdp.eval("window.__aurora.cam(0)")
-            await cdp.eval("window.__aurora.jev('text')")
-            for _ in range(45):
-                info = await cdp.eval("window.__aurora.run(1.0)")
-                if info["state"] == "finished":
-                    break
-
-            # Wait for result screen overlay to appear (3.3s in game time / timeout)
+            # Wait in real time for the result overlay (3.3s after finish)
             await asyncio.sleep(3.5)
-            await cdp.eval("window.__aurora.run(0.2)")
             final_info = await cdp.eval("window.__aurora.info()")
             await cdp.screenshot(IMG_DIR / "jev_result.png")
-            print(f"[✓] Race Finished! Position: P{final_info['pos']} | Lap Time: {final_info['laps']} | Saved docs/images/jev_result.png")
+            print(f"[✓] Real-Time Race Finished! Position: P{final_info['pos']} | Lap Time: {final_info['laps']}")
 
             if (IMG_DIR / "_tmp.png").exists():
                 (IMG_DIR / "_tmp.png").unlink()
@@ -265,14 +197,6 @@ async def main():
                     loop=0,
                     optimize=True,
                 )
-                print(f"[✓] Saved animated GIF: {gif_path}")
-
-            log_path = ROOT_DIR / "docs" / "jev_omni_race_log.json"
-            log_path.write_text(json.dumps({
-                "final_info": final_info,
-                "checkpoints": decision_logs,
-            }, indent=2, ensure_ascii=False), encoding="utf-8")
-            print(f"[✓] Saved race telemetry log: {log_path}")
 
     finally:
         chrome_proc.terminate()

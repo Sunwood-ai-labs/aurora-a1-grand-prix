@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-AURORA A1 Grand Prix — Jev-Omni Decision Bridge Server
-Serves the web game on http://localhost:8765 and bridges /api/jev/decide
-to a remote Google Colab A100 session running akhilaaa3/Jev-Omni (via google-colab-cli)
-or a local calibrated fallback when running offline.
+AURORA A1 Grand Prix — Real-Time Jev-Omni Decision Bridge Server
+Serves the web game on http://localhost:8765 and bridges /api/jev/decide to:
+  1. An in-process JevOmniClassifier instance (when running directly inside a Colab A100 notebook), or
+  2. A persistent Google Colab A100 WebSocket kernel connection (via google-colab-cli ColabRuntime), or
+  3. A local calibrated System-1 fallback when running offline.
 """
 import argparse
 import base64
@@ -12,21 +13,132 @@ import math
 import os
 import re
 import subprocess
+import threading
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 COLAB_SESSION = None
-USE_WSL_COLAB = True
+IN_PROCESS_CLASSIFIER = None
+_WORKER_LOCK = threading.Lock()
+_WORKER_PROC = None
+
+
+_PERSISTENT_WORKER_CODE = r"""
+import sys, json, base64
+from colab_cli.common import state
+from colab_cli.runtime import ColabRuntime
+
+session_name = sys.argv[1]
+name = state.resolve_session(session_name)
+s = state.store.get(name)
+if not s:
+    print(json.dumps({"error": f"Session {name} not found"}), flush=True)
+    sys.exit(1)
+
+runtime = ColabRuntime(
+    s.url,
+    s.token,
+    kernel_id=s.kernel_id,
+    session_id=s.session_id,
+    on_kernel_started=lambda kid: (setattr(s, "kernel_id", kid), state.store.add(s)),
+    on_session_started=lambda sid: (setattr(s, "session_id", sid), state.store.add(s)),
+)
+runtime.execute_code("import os; os.makedirs('/content', exist_ok=True); os.chdir('/content')")
+print("WORKER_READY", flush=True)
+
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        py_snippet = (
+            "import base64, json, time\n"
+            f"_req = json.loads(base64.b64decode('{line}').decode('utf-8'))\n"
+            "_t0 = time.time()\n"
+            "_kw = {'state': _req['state'], 'question': _req['question'], 'options': _req['options']}\n"
+            "if _req.get('modality') == 'image' and _req.get('image_b64'):\n"
+            "    _raw = _req['image_b64'].split(',')[-1]\n"
+            "    open('/content/aurora_frame.jpg', 'wb').write(base64.b64decode(_raw))\n"
+            "    _kw['media'] = '/content/aurora_frame.jpg'\n"
+            "    _kw['modality'] = 'image'\n"
+            "_res = classifier.predict(**_kw)\n"
+            "_res['latency_ms'] = round((time.time() - _t0) * 1000, 1)\n"
+            "_res['backend'] = 'Colab A100 (Jev-Omni 12B)'\n"
+            "print('JEV_JSON_START:' + json.dumps(_res))\n"
+        )
+        outputs = runtime.execute_code(py_snippet, timeout=15.0)
+        found = None
+        for out in outputs:
+            txt = out.get("text", "") if isinstance(out, dict) else str(out)
+            for ln in txt.splitlines():
+                if "JEV_JSON_START:" in ln:
+                    found = ln.split("JEV_JSON_START:", 1)[1].strip()
+        print(found if found else json.dumps({"error": "no output"}), flush=True)
+    except Exception as e:
+        print(json.dumps({"error": str(e)}), flush=True)
+"""
+
+
+def _get_persistent_worker():
+    global _WORKER_PROC
+    if _WORKER_PROC is not None and _WORKER_PROC.poll() is None:
+        return _WORKER_PROC
+    if not COLAB_SESSION:
+        return None
+    if os.name == "nt":
+        cmd = [
+            "wsl", "bash", "-c",
+            f"~/.local/share/uv/tools/google-colab-cli/bin/python -u -c {json.dumps(_PERSISTENT_WORKER_CODE)} {COLAB_SESSION}"
+        ]
+    else:
+        colab_py = os.path.expanduser("~/.local/share/uv/tools/google-colab-cli/bin/python")
+        py_bin = colab_py if os.path.exists(colab_py) else "python3"
+        cmd = [py_bin, "-u", "-c", _PERSISTENT_WORKER_CODE, COLAB_SESSION]
+
+    proc = subprocess.Popen(
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    ready_line = proc.stdout.readline().strip()
+    if "WORKER_READY" in ready_line:
+        _WORKER_PROC = proc
+        return _WORKER_PROC
+    proc.terminate()
+    return None
+
+
+def query_in_process_jev(state: str, question: str, options: list[str], modality: str = "text", image_b64: str | None = None) -> dict | None:
+    """Execute Jev-Omni inference directly in-process (when running inside Google Colab)."""
+    if IN_PROCESS_CLASSIFIER is None:
+        return None
+    t0 = time.time()
+    kw = {"state": state, "question": question, "options": options}
+    if modality == "image" and image_b64:
+        raw = image_b64.split(",")[-1]
+        frame_path = "/tmp/aurora_frame.jpg"
+        Path(frame_path).write_bytes(base64.b64decode(raw))
+        kw["media"] = frame_path
+        kw["modality"] = "image"
+    with _WORKER_LOCK:
+        res = IN_PROCESS_CLASSIFIER.predict(**kw)
+    res["latency_ms"] = round((time.time() - t0) * 1000, 1)
+    res["backend"] = "Colab A100 (Jev-Omni 12B)"
+    return res
 
 
 def query_colab_jev(state: str, question: str, options: list[str], modality: str = "text", image_b64: str | None = None) -> dict | None:
-    """Execute Jev-Omni inference on the active Google Colab A100 session."""
+    """Execute Jev-Omni inference over a persistent WebSocket to the active Google Colab A100 session."""
+    if IN_PROCESS_CLASSIFIER is not None:
+        return query_in_process_jev(state, question, options, modality, image_b64)
     if not COLAB_SESSION:
         return None
 
-    t0 = time.time()
     req_data = {
         "state": state,
         "question": question,
@@ -36,42 +148,19 @@ def query_colab_jev(state: str, question: str, options: list[str], modality: str
     }
     b64_payload = base64.b64encode(json.dumps(req_data).encode("utf-8")).decode("ascii")
 
-    py_snippet = (
-        "import base64, json, time\n"
-        f"_req = json.loads(base64.b64decode('{b64_payload}').decode('utf-8'))\n"
-        "_t0 = time.time()\n"
-        "_kw = {'state': _req['state'], 'question': _req['question'], 'options': _req['options']}\n"
-        "if _req.get('modality') == 'image' and _req.get('image_b64'):\n"
-        "    _raw = _req['image_b64'].split(',')[-1]\n"
-        "    open('/content/aurora_frame.jpg', 'wb').write(base64.b64decode(_raw))\n"
-        "    _kw['media'] = '/content/aurora_frame.jpg'\n"
-        "    _kw['modality'] = 'image'\n"
-        "_res = classifier.predict(**_kw)\n"
-        "_res['latency_ms'] = round((time.time() - _t0) * 1000, 1)\n"
-        "_res['backend'] = 'Colab A100 (Jev-Omni 12B)'\n"
-        "print('JEV_JSON_START:' + json.dumps(_res))\n"
-    )
-
-    try:
-        if USE_WSL_COLAB and os.name == "nt":
-            cmd = ["wsl", "bash", "-c", f"~/.local/bin/colab exec -s {COLAB_SESSION} --timeout 30"]
-        else:
-            cmd = ["colab", "exec", "-s", COLAB_SESSION, "--timeout", "30"]
-
-        proc = subprocess.run(
-            cmd,
-            input=py_snippet,
-            text=True,
-            capture_output=True,
-            timeout=15,
-        )
-        if proc.returncode == 0:
-            for line in proc.stdout.splitlines():
-                if "JEV_JSON_START:" in line:
-                    raw_json = line.split("JEV_JSON_START:", 1)[1].strip()
-                    return json.loads(raw_json)
-    except Exception as exc:
-        print(f"[jev_bridge] Colab exec warning: {exc}")
+    with _WORKER_LOCK:
+        try:
+            proc = _get_persistent_worker()
+            if proc is not None:
+                proc.stdin.write(b64_payload + "\n")
+                proc.stdin.flush()
+                resp_line = proc.stdout.readline().strip()
+                if resp_line:
+                    parsed = json.loads(resp_line)
+                    if "prediction" in parsed:
+                        return parsed
+        except Exception as exc:
+            print(f"[jev_bridge] Persistent Colab worker warning: {exc}")
     return None
 
 
@@ -147,18 +236,32 @@ class AuroraJevHandler(SimpleHTTPRequestHandler):
         self.send_error(404)
 
 
+def start_background_server(port: int = 8765, classifier=None, colab_session: str | None = None):
+    """Helper to start the bridge server in a background daemon thread (ideal for Colab notebooks)."""
+    global IN_PROCESS_CLASSIFIER, COLAB_SESSION
+    if classifier is not None:
+        IN_PROCESS_CLASSIFIER = classifier
+    if colab_session is not None:
+        COLAB_SESSION = colab_session
+    server = ThreadingHTTPServer(("0.0.0.0", port), AuroraJevHandler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    return server
+
+
 def main():
     global COLAB_SESSION
     parser = argparse.ArgumentParser(description="AURORA A1 Grand Prix - Jev-Omni Bridge Server")
     parser.add_argument("--port", type=int, default=8765, help="HTTP port (default: 8765)")
-    parser.add_argument("--colab-session", type=str, default=None, help="Colab CLI session name (e.g. jev-a100)")
+    parser.add_argument("--colab-session", type=str, default=None, help="Colab CLI session name (e.g. jev-racer)")
     args = parser.parse_args()
     COLAB_SESSION = args.colab_session
 
     server = ThreadingHTTPServer(("0.0.0.0", args.port), AuroraJevHandler)
     print(f"[*] AURORA A1 Grand Prix + Jev-Omni Bridge running at http://localhost:{args.port}/")
     if COLAB_SESSION:
-        print(f"[*] Connected to Google Colab session: {COLAB_SESSION} (Jev-Omni 12B on A100)")
+        print(f"[*] Connecting persistent WebSocket worker to Google Colab session: {COLAB_SESSION}")
+        _get_persistent_worker()
     else:
         print("[*] Running with local calibrated System-1 bridge (pass --colab-session <name> for Colab A100)")
     try:

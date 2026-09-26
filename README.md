@@ -82,14 +82,19 @@ AIエージェントが FreeCAD で設計した F1 コンセプトカー **AUROR
 </tr>
 </table>
 
-### Jev-Omni ブリッジサーバーでの起動（Google Colab CLI A100 連携）
+### Google Colab ノートブック / ブリッジサーバーでの起動
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sunwood-ai-labs/aurora-a1-grand-prix/blob/main/notebooks/Jev_Omni_A100_Colab.ipynb)
+
+- **Colab ノートブック上で直接動かす場合**: [`notebooks/Jev_Omni_A100_Colab.ipynb`](notebooks/Jev_Omni_A100_Colab.ipynb) を開くと、本リポジトリを自動クローンし、Colab A100 GPU 上に `akhilaaa3/Jev-Omni` をロードしてインプロセス（約 98〜138 ms）の完全リアルタイム推論（時間を止めない 60FPS 動作）でレースを実行できます。
+- **ローカル PC から Google Colab CLI (`colab`) 経由で A100 に常時接続する場合**:
 
 ```bash
-# 1. Google Colab CLI (WSL2) で A100 セッションを起動して Jev-Omni を GPU にロードする場合
-wsl bash -c '~/.local/bin/colab run -g a100 -s jev-racer "echo ready"'
-wsl bash -c '~/.local/bin/colab exec -s jev-racer -f /mnt/c/Prj/Aurora_A1_Racer/tools/colab_init_jev.py'
+# 1. Google Colab CLI (WSL2) で A100 セッションを作成し Jev-Omni を GPU にロード
+wsl bash -c '~/.local/bin/colab new --gpu A100 -s jev-racer'
+wsl bash -c '~/.local/bin/colab exec -s jev-racer --timeout 180 -f /mnt/c/Prj/Aurora_A1_Racer/tools/colab_init_jev.py'
 
-# 2. ローカルブリッジサーバーを起動（Colab セッション未接続時はローカル System-1 に自動フォールバック）
+# 2. 永続 WebSocket ブリッジサーバーを起動（Colab セッション未指定時はローカル System-1 に自動フォールバック）
 python tools/jev_bridge.py --port 8765 --colab-session jev-racer
 ```
 

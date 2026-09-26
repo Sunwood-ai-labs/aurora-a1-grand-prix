@@ -622,10 +622,18 @@ async function pollJevBridge(tel) {
         backend: data.backend || 'A100 JEV-OMNI',
         summary: `${tel.curveStr} | Tgt ${tel.targetKmh}km/h | Err ${tel.errDeg > 0 ? '+' : ''}${tel.errDeg.toFixed(1)}°`,
       };
+      updateJevHUD();
       jevBusy = false;
       return;
     }
-  } catch { /* fallback to calibrated model when standalone */ }
+  } catch { /* fallback to calibrated model when standalone (e.g. GitHub Pages) */ }
+  const loc = localCalibratedJev(tel);
+  jevLastResult = {
+    ...loc,
+    latency_ms: Math.round(performance.now() - t0) || 1,
+    backend: 'LOCAL SYSTEM-1',
+    summary: `${tel.curveStr} | Tgt ${tel.targetKmh}km/h | Err ${tel.errDeg > 0 ? '+' : ''}${tel.errDeg.toFixed(1)}°`,
+  };
   jevBusy = false;
 }
 
@@ -633,30 +641,24 @@ function stepJevAutopilot(car, ctl, dt) {
   const tel = computeJevTelemetry(car);
   if (jevOverrideTimer > 0) jevOverrideTimer = Math.max(0, jevOverrideTimer - dt);
   jevTimer -= dt;
-  if (jevTimer <= 0) {
-    jevTimer = jevMode === 'vision' ? 0.25 : 0.12;
+  if (jevTimer <= 0 && !jevBusy) {
+    jevTimer = jevMode === 'vision' ? 0.08 : 0.04;
     if (jevOverrideTimer <= 0) {
-      const loc = localCalibratedJev(tel);
-      const keepA100 = jevLastResult.backend && jevLastResult.backend.includes('A100');
-      jevLastResult = {
-        ...loc,
-        latency_ms: keepA100 ? jevLastResult.latency_ms : 1,
-        backend: keepA100 ? jevLastResult.backend : 'LOCAL SYSTEM-1',
-        summary: `${tel.curveStr} | Tgt ${tel.targetKmh}km/h | Err ${tel.errDeg > 0 ? '+' : ''}${tel.errDeg.toFixed(1)}°`,
-      };
-      if (!frozen) pollJevBridge(tel);
-    } else {
-      jevLastResult.summary = `${tel.curveStr} | Tgt ${tel.targetKmh}km/h | Err ${tel.errDeg > 0 ? '+' : ''}${tel.errDeg.toFixed(1)}°`;
+      pollJevBridge(tel);
     }
   }
+  jevLastResult.summary = `${tel.curveStr} | Tgt ${tel.targetKmh}km/h | Err ${tel.errDeg > 0 ? '+' : ''}${tel.errDeg.toFixed(1)}°`;
+
   const p = jevLastResult.probabilities || {};
   const pGas = (p.FULL_GAS_STRAIGHT || 0) + (p.GAS_STEER_LEFT || 0) + (p.GAS_STEER_RIGHT || 0);
   const pBrk = (p.HARD_BRAKE || 0) + (p.BRAKE_ENTRY_LEFT || 0) + (p.BRAKE_ENTRY_RIGHT || 0);
   const pLeft = (p.GAS_STEER_LEFT || 0) + (p.BRAKE_ENTRY_LEFT || 0);
   const pRight = (p.GAS_STEER_RIGHT || 0) + (p.BRAKE_ENTRY_RIGHT || 0);
 
-  ctl.gas = pGas >= pBrk && car.v < tel.vt * 0.99;
-  ctl.brake = (pBrk > pGas && car.v > tel.vt * 0.96) || car.v > tel.vt * 1.03;
+  const speedBias = 1.0 + (pGas - pBrk) * 0.04;
+  const vTarget = tel.vt * speedBias;
+  ctl.gas = car.v < vTarget * 0.99;
+  ctl.brake = car.v > vTarget * 1.03 || ((p.HARD_BRAKE || 0) > 0.6 && car.v > tel.vt * 0.92);
   const steerBias = (pLeft - pRight) * 0.008;
   const effErr = tel.errRad + steerBias;
   ctl.left = effErr > 0.02;
