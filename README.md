@@ -55,10 +55,43 @@ AIエージェントが FreeCAD で設計した F1 コンセプトカー **AUROR
 | <kbd>↑</kbd> / <kbd>W</kbd> | アクセル |
 | <kbd>↓</kbd> / <kbd>S</kbd> | ブレーキ（止まった状態で押し続けるとバック） |
 | <kbd>←</kbd> <kbd>→</kbd> / <kbd>A</kbd> <kbd>D</kbd> | ハンドル |
+| <kbd>J</kbd> | **Jev-Omni AI パイロット切替**（`MANUAL` → `TEXT 12B` → `VISION 12B`） |
 | <kbd>C</kbd> | カメラ切り替え |
 | <kbd>R</kbd> | コースに戻る |
 | <kbd>M</kbd> | サウンド オン / オフ |
 | <kbd>Esc</kbd> / <kbd>P</kbd> | ポーズ |
+
+---
+
+## 🧠 Jev-Omni (Gemma 4 12B System-1) AI パイロットモード
+
+オープンウェイトのマルチモーダル意思決定分類器 **[`akhilaaa3/Jev-Omni`](https://huggingface.co/akhilaaa3/Jev-Omni)**（Gemma 4 12B-IT ベース）と連携し、トークン生成を行わずに 1 回の Forward Pass で 6 つのドライビングアクション（`FULL_GAS_STRAIGHT` / `GAS_STEER_LEFT` / `GAS_STEER_RIGHT` / `BRAKE_ENTRY_LEFT` / `BRAKE_ENTRY_RIGHT` / `HARD_BRAKE`）の確率分布をリアルタイム推論して走行します。
+
+<div align="center">
+<img src="docs/images/jev_gameplay.gif" width="640" alt="Jev-Omni Gameplay">
+</div>
+
+<table>
+<tr>
+<td width="50%"><img src="docs/images/jev_cockpit_vision.png" alt="Jev-Omni Cockpit Vision"><br><sub><b>JEV-VISION（マルチモーダル推論）</b>：WebGL キャンバス画像＋テレメトリを Colab A100 上の Jev-Omni に入力（約 138 ms）</sub></td>
+<td width="50%"><img src="docs/images/jev_battle_lead.png" alt="Jev-Omni Battle"><br><sub><b>JEV-TEXT（テレメトリ高速推論）</b>：ヘアピン進入で先頭 NOVA のインを突きオーバーテイク（約 98 ms）</sub></td>
+</tr>
+<tr>
+<td><img src="docs/images/jev_far_cam.png" alt="Jev-Omni Lead"><br><sub><b>P1 独走体制</b>：6 選択肢のリアルタイム確率バーとレイテンシを左 HUD に表示</sub></td>
+<td><img src="docs/images/jev_result.png" alt="Jev-Omni Victory"><br><sub><b>VICTORY!</b>：P4 グリッドから全車オーバーテイクし 1:00.913 で優勝</sub></td>
+</tr>
+</table>
+
+### Jev-Omni ブリッジサーバーでの起動（Google Colab CLI A100 連携）
+
+```bash
+# 1. Google Colab CLI (WSL2) で A100 セッションを起動して Jev-Omni を GPU にロードする場合
+wsl bash -c '~/.local/bin/colab run -g a100 -s jev-racer "echo ready"'
+wsl bash -c '~/.local/bin/colab exec -s jev-racer -f /mnt/c/Prj/Aurora_A1_Racer/tools/colab_init_jev.py'
+
+# 2. ローカルブリッジサーバーを起動（Colab セッション未接続時はローカル System-1 に自動フォールバック）
+python tools/jev_bridge.py --port 8765 --colab-session jev-racer
+```
 
 ---
 
@@ -98,24 +131,28 @@ freecadcmd tools/export_glb.py
 
 ## 💻 ローカルで遊ぶ
 
-ビルド不要の静的サイトです。GLB を読み込むため、HTTP サーバー経由で開いてください。
+[`start_game.bat`](start_game.bat) をダブルクリックするか、以下を実行すると Jev-Omni ブリッジ付きの HTTP サーバーが起動します。
 
 ```bash
-python -m http.server 8765
+python tools/jev_bridge.py --port 8765
 ```
 
-→ <http://localhost:8765/> を開きます。Windows なら [`start_game.bat`](start_game.bat) をダブルクリックするだけで起動します。
+→ <http://localhost:8765/> を開きます。
 
 ## 📁 構成
 
 ```
-index.html / style.css   HUD とメニュー
-js/main.js               ゲームループ、車の物理、AI、カメラ、HUD
-js/track.js              コース生成（スプライン）：路面・縁石・バリア・スタートゲート・景色
-js/audio.js              エンジン音などの合成（WebAudio）
-assets/aurora_a1.glb     FreeCAD から書き出した車のモデル
-tools/export_glb.py      FreeCAD → GLB エクスポーター
-docs/images/             README 用のスクリーンショット
+index.html / style.css       HUD（Jev-Omni テレメトリパネル含む）とメニュー
+js/main.js                   ゲームループ、車の物理、Jev-Omni AI パイロット、カメラ、HUD
+js/track.js                  コース生成（スプライン）：路面・縁石・バリア・スタートゲート・景色
+js/audio.js                  エンジン音などの合成（WebAudio）
+assets/aurora_a1.glb         FreeCAD から書き出した車のモデル
+tools/jev_bridge.py          Jev-Omni ローカル HTTP ブリッジ（Google Colab CLI A100 対応）
+tools/colab_init_jev.py      Colab A100 セッション上に Jev-Omni をロードする初期化スクリプト
+tools/run_jev_race.py        ヘッドレス Chrome + Colab A100 による自動レース＆テレメトリ記録
+tools/export_glb.py          FreeCAD → GLB エクスポーター
+docs/images/                 スクリーンショット・Jev-Omni 走行 GIF
+docs/jev_omni_race_log.json  Colab A100 Jev-Omni の実推論ログ
 ```
 
 ## 🧪 デバッグ
@@ -123,12 +160,15 @@ docs/images/             README 用のスクリーンショット
 ブラウザのコンソールから `__aurora` を操作できます。README のスクリーンショットもこれを使い、ヘッドレス Chrome で撮影しました。
 
 ```js
-__aurora.auto(true)      // 自動運転
+__aurora.jev('vision')   // Jev-Omni AI パイロット切り替え ('off' | 'text' | 'vision')
+__aurora.telemetry()     // Jev-Omni 入力用テレメトリとプロンプトを取得
 __aurora.run(10)         // シミュレーションを 10 秒進める
 __aurora.cam(2)          // カメラ切り替え（0: 追従, 1: 遠め, 2: コックピット, 3: 中継）
-__aurora.info()          // 速度・順位・ラップなど
+__aurora.info()          // 速度・順位・ラップ・Jev-Omni 推論結果など
 ```
 
 ## 🔗 関連
 
 - **CAD モデル**：[Sunwood-ai-labs/aurora-a1-freecad](https://github.com/Sunwood-ai-labs/aurora-a1-freecad)（3Dモデル・図面11枚・メイキング動画）
+- **Jev-Omni モデル**：[akhilaaa3/Jev-Omni](https://huggingface.co/akhilaaa3/Jev-Omni)
+

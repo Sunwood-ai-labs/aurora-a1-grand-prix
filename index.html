@@ -28,6 +28,15 @@
     <div class="lbl">POS</div><div id="pos" class="big">P4<small>/4</small></div>
     <div id="board"></div>
   </div>
+  <div id="hud-jev" class="panel">
+    <div class="jev-hdr">
+      <span class="lbl">JEV-OMNI AI</span>
+      <span id="jev-badge" class="badge">MANUAL</span>
+    </div>
+    <div id="jev-meta" class="jev-meta">Press <kbd>J</kbd> to toggle Jev-Omni AI</div>
+    <div id="jev-bars" class="jev-bars"></div>
+    <div id="jev-state" class="jev-state"></div>
+  </div>
   <canvas id="minimap" width="220" height="220"></canvas>
   <div id="hud-br" class="panel">
     <div id="rpm"><div id="rpmfill"></div></div>
@@ -49,7 +58,7 @@
   <div class="card">
     <div class="brand">AURORA <b>A1</b></div>
     <h1>GRAND PRIX</h1>
-    <p class="sub">FreeCADで設計した AURORA A1 でサーキットを駆け抜けろ</p>
+    <p class="sub">FreeCADで設計した AURORA A1 × Jev-Omni 意思決定AI</p>
     <div id="loadbar"><div id="loadfill"></div></div>
     <div id="loadtxt">CADモデル読込中…</div>
     <div class="opts">
@@ -57,12 +66,15 @@
         <div class="seg" data-opt="laps"><button data-v="1">1</button><button data-v="3" class="on">3</button><button data-v="5">5</button></div></div>
       <div><span class="lbl">RIVALS</span>
         <div class="seg" data-opt="diff"><button data-v="0">EASY</button><button data-v="1" class="on">NORMAL</button><button data-v="2">HARD</button></div></div>
+      <div><span class="lbl">PILOT (AI)</span>
+        <div class="seg" data-opt="jev"><button data-v="off">HUMAN</button><button data-v="text" class="on">JEV-TEXT</button><button data-v="vision">JEV-VISION</button></div></div>
     </div>
     <button id="start" disabled>START RACE</button>
     <div class="keys">
       <span><kbd>↑</kbd>/<kbd>W</kbd> アクセル</span>
       <span><kbd>↓</kbd>/<kbd>S</kbd> ブレーキ・バック</span>
       <span><kbd>←→</kbd>/<kbd>AD</kbd> ステア</span>
+      <span><kbd>J</kbd> Jev-Omni 切替</span>
       <span><kbd>C</kbd> カメラ</span>
       <span><kbd>R</kbd> コース復帰</span>
       <span><kbd>M</kbd> サウンド</span>

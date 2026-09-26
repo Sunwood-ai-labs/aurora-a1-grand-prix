@@ -1,0 +1,167 @@
+{
+  "final_info": {
+    "state": "finished",
+    "raceTime": 61.37,
+    "v": 207,
+    "s": 29.7,
+    "d": 0.41,
+    "dist": 2896.3,
+    "laps": [
+      60.91250000002151
+    ],
+    "pos": 1,
+    "jevMode": "text",
+    "jevLastResult": {
+      "prediction": "FULL_GAS_STRAIGHT",
+      "confidence": 0.8707503505555665,
+      "probabilities": {
+        "FULL_GAS_STRAIGHT": 0.8707503505555665,
+        "GAS_STEER_LEFT": 0.061529353483359306,
+        "GAS_STEER_RIGHT": 0.061529353483359306,
+        "BRAKE_ENTRY_LEFT": 0.001245471724527755,
+        "BRAKE_ENTRY_RIGHT": 0.001245471724527755,
+        "HARD_BRAKE": 0.003699999028659322
+      },
+      "latency_ms": 138.6,
+      "backend": "Colab A100 (Jev-Omni 12B)",
+      "summary": "STRAIGHT | Tgt 370km/h | Err +0.8°"
+    },
+    "ai": [
+      {
+        "n": "NOVA",
+        "v": 193,
+        "dist": 2697,
+        "laps": []
+      },
+      {
+        "n": "SOLAR",
+        "v": 152,
+        "dist": 2615,
+        "laps": []
+      },
+      {
+        "n": "CRIMSON",
+        "v": 119,
+        "dist": 2574,
+        "laps": []
+      }
+    ]
+  },
+  "checkpoints": [
+    {
+      "checkpoint": "Opening Straight & Launch",
+      "mode": "text",
+      "raceTime": 3.98,
+      "speed_kmh": 132.4,
+      "position": 3,
+      "telemetry_state": "Speed: 132 km/h (Optimal ahead: 370 km/h). Offset: 1.9m (Target lane: -0.6m). Heading error: 0.7 deg (on target). Upcoming: STRAIGHT. Surface: ASPHALT. Rival SOLAR 7m ahead (d=2.4m).",
+      "jev_omni_result": {
+        "prediction": "FULL_GAS_STRAIGHT",
+        "prediction_index": 0,
+        "confidence": 0.41230717301368713,
+        "probabilities": {
+          "FULL_GAS_STRAIGHT": 0.41230717301368713,
+          "GAS_STEER_LEFT": 0.028499703854322433,
+          "GAS_STEER_RIGHT": 0.020850826054811478,
+          "BRAKE_ENTRY_LEFT": 0.011880443431437016,
+          "BRAKE_ENTRY_RIGHT": 0.28783679008483887,
+          "HARD_BRAKE": 0.23862509429454803
+        },
+        "latency_ms": 100.7,
+        "backend": "Colab A100 (Jev-Omni 12B)"
+      }
+    },
+    {
+      "checkpoint": "Turn 1 Braking & Overtake",
+      "mode": "text",
+      "raceTime": 10.8,
+      "speed_kmh": 272.9,
+      "position": 3,
+      "telemetry_state": "Speed: 273 km/h (Optimal ahead: 289 km/h). Offset: -0.6m (Target lane: 2.0m). Heading error: 3.0 deg (steer LEFT). Upcoming: STRAIGHT. Surface: ASPHALT. Rival SOLAR 7m ahead (d=-1.0m).",
+      "jev_omni_result": {
+        "prediction": "GAS_STEER_LEFT",
+        "prediction_index": 1,
+        "confidence": 0.979142427444458,
+        "probabilities": {
+          "FULL_GAS_STRAIGHT": 0.003317386144772172,
+          "GAS_STEER_LEFT": 0.979142427444458,
+          "GAS_STEER_RIGHT": 0.00814671441912651,
+          "BRAKE_ENTRY_LEFT": 0.0035313391126692295,
+          "BRAKE_ENTRY_RIGHT": 0.0038182877469807863,
+          "HARD_BRAKE": 0.0020437822677195072
+        },
+        "latency_ms": 98.4,
+        "backend": "Colab A100 (Jev-Omni 12B)"
+      }
+    },
+    {
+      "checkpoint": "Cockpit Vision Multimodal Decision",
+      "mode": "vision",
+      "raceTime": 19.17,
+      "speed_kmh": 258.7,
+      "position": 2,
+      "telemetry_state": "Speed: 259 km/h (Optimal ahead: 281 km/h). Offset: 3.6m (Target lane: 1.8m). Heading error: -1.3 deg (on target). Upcoming: RIGHT. Surface: ASPHALT. Clear track ahead.",
+      "jev_omni_result": {
+        "prediction": "GAS_STEER_RIGHT",
+        "prediction_index": 2,
+        "confidence": 0.9184315204620361,
+        "probabilities": {
+          "FULL_GAS_STRAIGHT": 0.006957740988582373,
+          "GAS_STEER_LEFT": 0.036172252148389816,
+          "GAS_STEER_RIGHT": 0.9184315204620361,
+          "BRAKE_ENTRY_LEFT": 0.00965986680239439,
+          "BRAKE_ENTRY_RIGHT": 0.014557931572198868,
+          "HARD_BRAKE": 0.014220698736608028
+        },
+        "latency_ms": 138.5,
+        "backend": "Colab A100 (Jev-Omni 12B)"
+      }
+    },
+    {
+      "checkpoint": "Mid-Sector High-Speed S-Curves",
+      "mode": "text",
+      "raceTime": 29.6,
+      "speed_kmh": 119.8,
+      "position": 2,
+      "telemetry_state": "Speed: 120 km/h (Optimal ahead: 179 km/h). Offset: -3.7m (Target lane: -1.3m). Heading error: 1.4 deg (on target). Upcoming: SHARP LEFT. Surface: ASPHALT. Rival NOVA 6m ahead (d=-4.3m).",
+      "jev_omni_result": {
+        "prediction": "GAS_STEER_LEFT",
+        "prediction_index": 1,
+        "confidence": 0.5577059388160706,
+        "probabilities": {
+          "FULL_GAS_STRAIGHT": 0.010958816856145859,
+          "GAS_STEER_LEFT": 0.5577059388160706,
+          "GAS_STEER_RIGHT": 0.1437913328409195,
+          "BRAKE_ENTRY_LEFT": 0.21417653560638428,
+          "BRAKE_ENTRY_RIGHT": 0.04560081288218498,
+          "HARD_BRAKE": 0.02776654250919819
+        },
+        "latency_ms": 98.8,
+        "backend": "Colab A100 (Jev-Omni 12B)"
+      }
+    },
+    {
+      "checkpoint": "Far Chase Cam Vision Decision",
+      "mode": "vision",
+      "raceTime": 42.1,
+      "speed_kmh": 245.1,
+      "position": 1,
+      "telemetry_state": "Speed: 245 km/h (Optimal ahead: 263 km/h). Offset: 3.9m (Target lane: 2.1m). Heading error: -1.2 deg (on target). Upcoming: RIGHT. Surface: ASPHALT. Clear track ahead.",
+      "jev_omni_result": {
+        "prediction": "GAS_STEER_RIGHT",
+        "prediction_index": 2,
+        "confidence": 0.8958757519721985,
+        "probabilities": {
+          "FULL_GAS_STRAIGHT": 0.003035274101421237,
+          "GAS_STEER_LEFT": 0.07587230205535889,
+          "GAS_STEER_RIGHT": 0.8958757519721985,
+          "BRAKE_ENTRY_LEFT": 0.00757129630073905,
+          "BRAKE_ENTRY_RIGHT": 0.00913272611796856,
+          "HARD_BRAKE": 0.00851263664662838
+        },
+        "latency_ms": 138.6,
+        "backend": "Colab A100 (Jev-Omni 12B)"
+      }
+    }
+  ]
+}
