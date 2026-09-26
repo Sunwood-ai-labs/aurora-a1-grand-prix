@@ -140,7 +140,9 @@ async def run(args):
         "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
         "--user-data-dir=" + profile, f"http://127.0.0.1:{args.port}/",
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    tag = f"{args.mode}_{args.timing}"
+    tag = f"tactics_{args.policy.replace(':', '_').lower()}" if args.mode == "tactics" else f"{args.mode}_{args.timing}"
+    if not args.colab_session and not (args.mode == "tactics" and args.policy != "jev"):
+        tag += "_nomodel"   # never overwrite a real model run with a fallback test
     stamps: list[float] = []
     try:
         async with websockets.connect(wait_for_cdp(), max_size=64 * 1024 * 1024) as ws:
@@ -165,7 +167,7 @@ async def run(args):
             recording["on"] = True
 
             cam = {"chase": 0, "far": 1, "cockpit": 2, "tv": 3}[args.cam]
-            await cdp.eval(f"window.__aurora.start({{laps: {args.laps}, diff: {args.diff}, jev: '{args.mode}', timing: '{args.timing}', cam: {cam}}})")
+            await cdp.eval(f"window.__aurora.start({{laps: {args.laps}, diff: {args.diff}, jev: '{args.mode}', timing: '{args.timing}', policy: '{args.policy}', cam: {cam}}})")
             while (await cdp.eval("window.__aurora.info().state")) != "race":
                 await asyncio.sleep(0.1)
             print(f"[*] GO — Jev-Omni {args.mode.upper()} / {args.timing.upper()} / cam {args.cam}")
@@ -209,10 +211,10 @@ async def run(args):
         shutil.rmtree(profile, ignore_errors=True)
 
     lat = sorted(d["ms"] for d in log) or [0]
-    model_calls = [d for d in log if "FALLBACK" not in d["backend"]]
+    model_calls = [d for d in log if "Jev-Omni" in d["backend"]]
     off = sum(1 for d in log if d["surface"] == 2)
     summary = {
-        "mode": args.mode, "timing": args.timing, "camera": args.cam, "laps": args.laps,
+        "mode": args.mode, "policy": args.policy if args.mode == "tactics" else None, "timing": args.timing, "camera": args.cam, "laps": args.laps,
         "finished": finished, "position": final["pos"], "lap_times": final["laps"],
         "race_time_s": final["raceTime"], "wall_time_s": round(wall_total, 1),
         "distance_m": final["dist"],
@@ -220,6 +222,7 @@ async def run(args):
         "decision_rate_hz": round(len(log) / max(wall_total, 1e-3), 2),
         "latency_ms_median": lat[len(lat) // 2], "latency_ms_p90": lat[int(len(lat) * 0.9)],
         "decisions_on_grass_pct": round(100 * off / max(len(log), 1), 1),
+        "tactic_counts": {t: sum(1 for d in log if d["pred"] == t) for t in sorted({d["pred"] for d in log})},
     }
     out = ROOT_DIR / "docs" / f"jev_race_{tag}.json"
     out.write_text(json.dumps({"summary": summary, "decisions": log}, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -232,7 +235,8 @@ async def run(args):
 def main():
     ap = argparse.ArgumentParser(description="Record an AURORA A1 race driven by Jev-Omni")
     ap.add_argument("--colab-session", default=None, help="google-colab-cli session with Jev-Omni loaded (e.g. jev-racer)")
-    ap.add_argument("--mode", choices=["vision", "sensor", "fusion", "text"], default="vision")
+    ap.add_argument("--mode", choices=["tactics", "vision", "sensor", "fusion", "text"], default="vision")
+    ap.add_argument("--policy", choices=["jev", "rule", "pass_only", "random", "fixed", "fixed:PASS_LEFT", "fixed:PASS_RIGHT", "fixed:BOOST"], default="jev", help="tactics mode: who picks the tactic")
     ap.add_argument("--timing", choices=["realtime", "step"], default="realtime")
     ap.add_argument("--cam", choices=["chase", "far", "cockpit", "tv"], default="cockpit")
     ap.add_argument("--laps", type=int, default=1)

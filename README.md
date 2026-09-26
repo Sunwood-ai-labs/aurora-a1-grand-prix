@@ -55,7 +55,7 @@ AIエージェントが FreeCAD で設計した F1 コンセプトカー **AUROR
 | <kbd>↑</kbd> / <kbd>W</kbd> | アクセル |
 | <kbd>↓</kbd> / <kbd>S</kbd> | ブレーキ（止まった状態で押し続けるとバック） |
 | <kbd>←</kbd> <kbd>→</kbd> / <kbd>A</kbd> <kbd>D</kbd> | ハンドル |
-| <kbd>J</kbd> | **Jev-Omni AI パイロット切替**（`MANUAL` → `VISION` → `SENSOR` → `V+S` → `TEXT`） |
+| <kbd>J</kbd> | **Jev-Omni AI パイロット切替**（`MANUAL` → `TACTICS` → `VISION` → `SENSOR` → `V+S` → `TEXT`） |
 | <kbd>T</kbd> | Jev-Omni のタイミング切替（`REALTIME` ⇄ `STEP`＝判断を待つ間は時間停止） |
 | <kbd>C</kbd> | カメラ切り替え |
 | <kbd>R</kbd> | コースに戻る |
@@ -73,6 +73,7 @@ AIエージェントが FreeCAD で設計した F1 コンセプトカー **AUROR
 | **JEV-VISION**（デフォルト） | 3D 画面のキャプチャ（512×288 JPEG。HUD は含まない）と、メーターに出ている速度・ギアだけを入力。コースの座標や曲率は渡さない |
 | **JEV-SENSOR** | 距離センサーの値だけ（画像なし）。車から 7 方向（左 60°・30°・10°、正面、右 10°・30°・60°）に光線を出し、舗装路の端までの距離を測る LiDAR 風のセンサーと、左右のコース端までの距離。走行ラインや目標速度は含まない |
 | **JEV-V+S**（VISION+SENSOR） | 画面キャプチャ＋距離センサーの値 |
+| **JEV-TACTICS** | 2 層型（下の「2 層型」を参照）。Jev-Omni は戦術だけを選び、運転は制御器が行う |
 | **JEV-TEXT** | ゲームが計算したコース情報（安全速度、走行ラインの方向、次のカーブ、路面）を文章で入力 |
 | **REALTIME**（デフォルト） | ゲームの時間は止めない。推論が返るまで車は直前の判断のまま走り続ける |
 | **STEP** | 判断が返るまでゲームの時間を止め、1 回の判断ごとに 0.2 秒だけ進める |
@@ -81,7 +82,7 @@ AIエージェントが FreeCAD で設計した F1 コンセプトカー **AUROR
 - Jev-Omni モードでも車の性能は人間と同じです。
 - ブリッジ（`tools/jev_bridge.py`）がモデルにつながっていないとき（GitHub Pages など）は、ゲーム内のルールで走ります。このとき HUD には `LOCAL FALLBACK (no model)` と表示されます。
 
-### 結果：Jev-Omni はこのゲームを運転できませんでした
+### 結果：Jev-Omni に直接運転させると走れませんでした
 
 Google Colab A100 上の Jev-Omni で 1 周レースを録画しました（Colab CLI の永続接続で推論 約 110 ms、画像付き往復で 1.5〜4 Hz）。
 
@@ -120,6 +121,36 @@ Jev-Omni は **選択肢の 1 番目を選ぶ傾向が強く**、このゲーム
 
 センサーの値だけを渡すと左右をかなり見分けられるようになりますが、画像も一緒に渡すと答えは画像側（ほぼ「左」）に引っ張られ、センサーの値は使われませんでした。実際の走行でも、SENSOR は 1 コーナー手前でバリアに当たり、止まったあとは同じ判断を繰り返すだけでした。
 
+### 2 層型：Jev-Omni が戦術、制御器が運転（JEV-TACTICS）
+
+実際の自動運転と同じように役割を分けたモードです。
+
+| 層 | 担当 | 頻度 |
+| --- | --- | --- |
+| 上：戦術を選ぶ | 5 択：`NORMAL`（普通に走る）/ `BOOST`（バッテリーで加速）/ `HARVEST`（少し抑えて充電）/ `PASS_LEFT`・`PASS_RIGHT`（前の車を左・右から抜く） | 約 1 回/秒 |
+| 下：制御器が運転 | 走行ラインを一定のペースでなぞる。遅い車の後ろではついていくだけで、上の層が指示したときだけ抜きにいく（横に約 3 m の空きが必要）。バッテリーは BOOST で減り、HARVEST で増える | 240 回/秒 |
+
+- Jev-Omni には状況を文章で渡します（順位、速度、バッテリー残量、次のカーブまでの距離と向き、前の車までの距離・速度差・左右の空き）。
+- 選択肢を 1 番目に置いたものを選びやすい癖があるので、選択肢の順番を 5 通りに回して確率を平均しています（1 回の判断に約 480 ms）。
+- 下の層・車の性能・ライバルは、どの方針でも同じです。上の層だけを入れ替えて、2 周のレース（ライバル NORMAL・最後尾スタート）で比べました。すべて同じランナーでリアルタイムに録画しています。
+
+| 上の層（戦術を選ぶ方針） | 順位 | 2 周タイム | 選んだ戦術 |
+| --- | --- | --- | --- |
+| 常に「左から抜く」 | **P1** | **122.9 s** | PASS_LEFT のみ |
+| **Jev-Omni** | P2 | 124.5 s | PASS_LEFT 120・PASS_RIGHT 32・NORMAL 4（BOOST・HARVEST は 0） |
+| 手書きルール | P2 | 125.3 s | 状況で 5 つを使い分け |
+| 常に NORMAL | P3 | 126.1 s | NORMAL のみ |
+| ランダム | P4 | 128.2 s | 5 つを均等に |
+
+<div align="center">
+<img src="docs/images/jev_tactics_compare.gif" width="720" alt="two-layer pilot: five policies">
+<br><sub>5 つの方針を並べたもの（8 倍速）。<a href="docs/videos/jev_tactics_compare.mp4">MP4（等速）</a></sub>
+</div>
+
+**結果**：Jev-Omni は常に NORMAL・ランダム・手書きルールより速く走りました。ただし、**何も考えずに「常に左から抜く」だけの方針に負けています**。Jev-Omni の選択はほぼ「抜く」一択で、バッテリーは一度も使いませんでした。このコースでは抜きにいくことに損がない（空きがなければ後ろにつくだけ）ので、「常に抜く」が一番速くなります。Jev-Omni の成績はその「攻める」傾向から来ていて、状況に応じた判断ができているとは言えません。
+
+Jev-Omni の判断力を測るには、抜きにいくと損をする場面（空きがないのに並びかけると接触して減速する、など）を作る必要があります。
+
 > 以前のバージョン（コミット `ca99b48`・`adab4f4`）の「P1 で優勝」という結果は、Jev-Omni の出力を内蔵 AI の走行ライン追従に小さく足していただけで、さらに Jev モードだけ車の性能（グリップ 1.22 倍・加速 1.25 倍・空気抵抗 0.62 倍）が上がっていました。そのため Jev-Omni の実力を示すものではなく、現在のバージョンでは補助と性能差を取り除いています。
 
 ### 自分で走らせる
@@ -139,6 +170,7 @@ python tools/jev_bridge.py --port 8765 --colab-session jev-racer
 
 # 2b. 自動で 1 周走らせて MP4 / GIF / 判断ログを保存（--timing step で時間停止モード）
 python tools/run_jev_race.py --colab-session jev-racer --mode vision --timing realtime   # --mode sensor / fusion / text
+python tools/run_jev_race.py --colab-session jev-racer --mode tactics --policy jev --laps 2 --cam chase   # 2 層型（--policy rule / random / fixed / fixed:PASS_LEFT で比較用）
 
 # 3. 使い終わったら必ず止める（止めないと compute unit が減り続けます）
 wsl bash -c '~/.local/bin/colab stop -s jev-racer'
@@ -215,7 +247,8 @@ docs/jev_race_*.json         各走行の判断ログと集計（Colab A100 の�
 ブラウザのコンソールから `__aurora` を操作できます。README のスクリーンショットもこれを使い、ヘッドレス Chrome で撮影しました。
 
 ```js
-__aurora.jev('vision')   // Jev-Omni AI パイロット切り替え ('off' | 'vision' | 'sensor' | 'fusion' | 'text')
+__aurora.jev('vision')   // Jev-Omni AI パイロット切り替え ('off' | 'tactics' | 'vision' | 'sensor' | 'fusion' | 'text')
+__aurora.policy('rule')  // TACTICS の上の層: 'jev' | 'rule' | 'pass_only' | 'random' | 'fixed' | 'fixed:PASS_LEFT'
 __aurora.timing('step')  // 'realtime' | 'step'
 __aurora.jevLog()        // Jev-Omni の判断ログ
 __aurora.probe()         // 評価用：モデルに渡す画像と、コース形状から計算した正解

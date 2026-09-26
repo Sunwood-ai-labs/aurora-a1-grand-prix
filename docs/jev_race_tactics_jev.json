@@ -1,0 +1,31 @@
+{
+ "summary": {
+  "mode": "tactics",
+  "policy": "jev",
+  "timing": "realtime",
+  "camera": "chase",
+  "laps": 2,
+  "finished": true,
+  "position": 2,
+  "lap_times": [
+   65.1819249998902,
+   59.31717499998095
+  ],
+  "race_time_s": 128.88,
+  "wall_time_s": 128.9,
+  "distance_m": 5870.7,
+  "decisions": 156,
+  "model_decisions": 156,
+  "decision_rate_hz": 1.21,
+  "latency_ms_median": 484,
+  "latency_ms_p90": 491,
+  "decisions_on_grass_pct": 0.0,
+  "tactic_counts": {
+   "NORMAL": 4,
+   "PASS_LEFT": 120,
+   "PASS_RIGHT": 32
+  }
+ },
+ "decisions": null,
+ "note": "Per-decision log was accidentally overwritten after the run; summary restored from the run's console output. Video is cropped from docs/videos/jev_tactics_compare.mp4 (640x360)."
+}

@@ -42,6 +42,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0816; col
 .badge.text { background: rgba(46,230,166,.22); color: #2ee6a6; border: 1px solid rgba(46,230,166,.5); }
 .badge.vision { background: rgba(255,42,166,.25); color: #ff66c4; border: 1px solid rgba(255,42,166,.55); }
 .badge.fusion { background: rgba(120,160,255,.22); color: #8fb0ff; border: 1px solid rgba(120,160,255,.55); }
+.badge.tactics { background: rgba(255,230,80,.2); color: #ffe066; border: 1px solid rgba(255,230,80,.5); }
 .badge.sensor { background: rgba(255,170,40,.22); color: #ffb340; border: 1px solid rgba(255,170,40,.55); }
 .jev-meta { font-size: 11px; color: var(--dim); margin-bottom: 6px; display: flex; justify-content: space-between; }
 .jev-bars { display: flex; flex-direction: column; gap: 4px; }

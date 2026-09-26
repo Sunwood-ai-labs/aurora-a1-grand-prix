@@ -61,7 +61,20 @@ def _get_persistent_worker():
     return None
 
 
-def query_in_process_jev(state: str, question: str, options: list[str], modality: str = "text", image_b64: str | None = None) -> dict | None:
+def predict_debiased(classifier, kw: dict) -> dict:
+    """Average Jev-Omni's probabilities over every cyclic order of the options (cancels position bias)."""
+    opts = kw["options"]
+    acc = {o: 0.0 for o in opts}
+    for r in range(len(opts)):
+        probs = classifier.predict(**{**kw, "options": opts[r:] + opts[:r]})["probabilities"]
+        for o in opts:
+            acc[o] += probs[o] / len(opts)
+    best = max(acc, key=acc.get)
+    return {"prediction": best, "prediction_index": opts.index(best), "confidence": acc[best], "probabilities": acc}
+
+
+def query_in_process_jev(state: str, question: str, options: list[str], modality: str = "text", image_b64: str | None = None,
+                         debias: bool = False) -> dict | None:
     """Execute Jev-Omni inference directly in-process (when running inside Google Colab)."""
     if IN_PROCESS_CLASSIFIER is None:
         return None
@@ -74,16 +87,17 @@ def query_in_process_jev(state: str, question: str, options: list[str], modality
         kw["media"] = frame_path
         kw["modality"] = "image"
     with _WORKER_LOCK:
-        res = IN_PROCESS_CLASSIFIER.predict(**kw)
+        res = predict_debiased(IN_PROCESS_CLASSIFIER, kw) if debias else IN_PROCESS_CLASSIFIER.predict(**kw)
     res["latency_ms"] = round((time.time() - t0) * 1000, 1)
     res["backend"] = "Colab A100 (Jev-Omni 12B)"
     return res
 
 
-def query_colab_jev(state: str, question: str, options: list[str], modality: str = "text", image_b64: str | None = None) -> dict | None:
+def query_colab_jev(state: str, question: str, options: list[str], modality: str = "text", image_b64: str | None = None,
+                    debias: bool = False) -> dict | None:
     """Execute Jev-Omni inference over a persistent WebSocket to the active Google Colab A100 session."""
     if IN_PROCESS_CLASSIFIER is not None:
-        return query_in_process_jev(state, question, options, modality, image_b64)
+        return query_in_process_jev(state, question, options, modality, image_b64, debias)
     if not COLAB_SESSION:
         return None
 
@@ -93,6 +107,7 @@ def query_colab_jev(state: str, question: str, options: list[str], modality: str
         "options": options,
         "modality": modality if modality in ("text", "image") else "text",
         "image_b64": image_b64 if modality == "image" else None,
+        "debias": debias,
     }
     b64_payload = base64.b64encode(json.dumps(req_data).encode("utf-8")).decode("ascii")
 
@@ -130,7 +145,7 @@ class AuroraJevHandler(SimpleHTTPRequestHandler):
             modality = body.get("modality", "text")
             image_b64 = body.get("image_base64")
 
-            res = query_colab_jev(state, question, options, modality, image_b64)
+            res = query_colab_jev(state, question, options, modality, image_b64, bool(body.get("debias")))
             if res is None:
                 # no model connected: the game falls back to its own (clearly labelled) rule
                 self.send_error(503, "Jev-Omni backend not connected")

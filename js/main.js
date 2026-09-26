@@ -217,7 +217,7 @@ const audio = new Audio();
 let cars = [], player = null, template = null;
 let state = 'loading', raceTime = 0, countdown = 0, laps = 3, diff = 1, bestLap = Infinity;
 let lastLight = -1, msgTimer = 0;
-let jevMode = 'vision'; // 'off' | 'vision' (screen frames) | 'sensor' (range sensors) | 'fusion' (frames + sensors) | 'text' (course telemetry)
+let jevMode = 'vision'; // 'off' | 'vision' (screen frames) | 'sensor' (range sensors) | 'fusion' (frames + sensors) | 'text' | 'tactics' (two-layer) (course telemetry)
 const jevProfile = speedProfile(1.0);
 try { bestLap = parseFloat(localStorage.getItem('aurora_best') || 'Infinity'); } catch { /* storage unavailable */ }
 $('best').textContent = fmt(bestLap);
@@ -245,8 +245,8 @@ function buildCars() {
 function startRace() {
   buildCars();
   raceTime = 0; countdown = 0; lastLight = -1; state = 'countdown';
-  camMode = jevMode !== 'off' && jevMode !== 'text' ? CAMS.indexOf('COCKPIT') : 0; $('cam').textContent = `CAM: ${CAMS[camMode]} (C)`;
-  jevLog = []; jevBusy = false; jevTimer = 0;
+  camMode = !['off', 'text', 'tactics'].includes(jevMode) ? CAMS.indexOf('COCKPIT') : 0; $('cam').textContent = `CAM: ${CAMS[camMode]} (C)`;
+  jevLog = []; jevBusy = false; jevTimer = 0; resetTactics();
   camYaw = player.yaw;
   $('title').classList.add('hidden'); $('result').classList.add('hidden'); $('hud').classList.remove('hidden');
   $('lights').classList.add('show');
@@ -283,7 +283,7 @@ function stepPlayer(car, dt, controls) {
 
   // longitudinal
   let a = 0;
-  if (controls.gas) a += vF >= -0.5 ? engineAccel(vF) * (surf === 2 ? 0.6 : 1) : brakeAccel(0);
+  if (controls.gas) a += vF >= -0.5 ? engineAccel(vF) * (surf === 2 ? 0.6 : 1) * (controls.ers ?? 1) : brakeAccel(0);
   if (controls.brake) a -= vF > 0.5 ? brakeAccel(vF) * (surf === 2 ? 0.5 : 1) : (vF > -12 ? 6 : 0);
   a -= dragAccel(vF) + Math.sign(vF) * (surf === 2 ? 0.02 * vF * vF + 3 : 0.35);
   if (!controls.gas && !controls.brake && Math.abs(vF) < 0.4) vF = 0;
@@ -527,7 +527,7 @@ jevFrame.width = 512; jevFrame.height = 288;
 function initJevHUD() {
   const bars = $('jev-bars');
   if (!bars) return;
-  bars.innerHTML = JEV_OPTIONS.map((o) => `
+  bars.innerHTML = jevOptions().map((o) => `
     <div class="jev-row" id="jrow-${o.id}">
       <span>${o.label}</span>
       <div class="jev-bar-bg"><div class="jev-bar-fg" id="jbar-${o.id}"></div></div>
@@ -537,7 +537,7 @@ function initJevHUD() {
 }
 
 function cycleJevMode() {
-  const order = ['off', 'vision', 'sensor', 'fusion', 'text'];
+  const order = ['off', 'tactics', 'vision', 'sensor', 'fusion', 'text'];
   jevMode = order[(order.indexOf(jevMode) + 1) % order.length];
   if (player) player.name = jevMode === 'off' ? 'YOU' : 'JEV-OMNI';
   showMsg(`JEV-OMNI: ${jevMode.toUpperCase()}`, 1.2);
@@ -591,6 +591,11 @@ function sensorText(sn) {
 function buildJevInput(car) {
   const kmh = Math.round(car.v * 3.6), g = gearOf(car.v);
   const question = 'What should the driver do right now to stay on the track and drive fast?';
+  if (jevMode === 'tactics') {
+    const ts = tacticState(car);
+    return { state: ts.text, question: 'Which race tactic should the driver use for the next second?',
+      options: TACTICS.map((o) => o.text), modality: 'text', debias: true };
+  }
   const options = JEV_OPTIONS.map((o) => o.text);
   if (jevMode === 'sensor') {   // range sensors only, no image
     const sn = readSensors(car);
@@ -625,15 +630,17 @@ function localFallbackJev(car) {
 function applyJevProbs(probs, latency, backend) {
   const probabilities = {};
   let best = 0;
-  JEV_OPTIONS.forEach((o, k) => { probabilities[o.id] = probs[k] || 0; if (probs[k] > probs[best]) best = k; });
+  const opts = jevOptions();
+  opts.forEach((o, k) => { probabilities[o.id] = probs[k] || 0; if (probs[k] > probs[best]) best = k; });
   jevLastResult = {
-    prediction: JEV_OPTIONS[best].id, confidence: probs[best], probabilities,
-    latency_ms: Math.round(latency), backend, summary: JEV_OPTIONS[best].text,
+    prediction: opts[best].id, confidence: probs[best], probabilities,
+    latency_ms: Math.round(latency), backend, summary: opts[best].text,
   };
   const now = performance.now();
   if (jevLastAt) jevHz = lerp(jevHz, 1000 / Math.max(1, now - jevLastAt), 0.3);
   jevLastAt = now;
   jevLog.push({ t: +raceTime.toFixed(2), kmh: Math.round(player.v * 3.6), surface: player.surface, mode: jevMode, timing: jevTiming,
+    battery: Math.round(player.battery ?? 0), pos: standings().indexOf(player) + 1,
     pred: jevLastResult.prediction, conf: +probs[best].toFixed(3), ms: jevLastResult.latency_ms, backend });
   updateJevHUD();
 }
@@ -657,12 +664,16 @@ async function pollJev(car) {
       return;
     }
   } catch { /* no bridge: standalone page */ }
-  applyJevProbs(localFallbackJev(car), performance.now() - t0, 'LOCAL FALLBACK (no model)');
+  if (jevMode === 'tactics') {
+    const r = ruleTactic(tacticState(car), car);
+    applyJevProbs(TACTICS.map((o) => (o.id === r ? 1 : 0)), performance.now() - t0, 'LOCAL FALLBACK (rule, no model)');
+  } else applyJevProbs(localFallbackJev(car), performance.now() - t0, 'LOCAL FALLBACK (no model)');
   jevBusy = false;
 }
 
 // The car is driven only by Jev-Omni's probability distribution: no racing-line or speed-profile assist.
 function stepJevAutopilot(car, ctl, dt) {
+  if (jevMode === 'tactics') { stepTactics(car, ctl, dt); return; }
   jevTimer -= dt;
   if (!jevBusy && jevTimer <= 0) {
     jevTimer = jevTiming === 'step' ? JEV_STEP_DT : 0;
@@ -689,12 +700,12 @@ function updateJevHUD() {
     badge.className = 'badge';
     meta.innerHTML = 'Press <kbd>J</kbd> to activate Jev-Omni AI';
   } else {
-    badge.textContent = `${jevMode === 'fusion' ? 'V+S' : jevMode.toUpperCase()} · ${jevTiming === 'step' ? 'STEP' : 'REALTIME'}`;
+    badge.textContent = jevMode === 'tactics' ? `TACTICS · ${tacticPolicy.toUpperCase()}` : `${jevMode === 'fusion' ? 'V+S' : jevMode.toUpperCase()} · ${jevTiming === 'step' ? 'STEP' : 'REALTIME'}`;
     badge.className = 'badge ' + jevMode;
     meta.innerHTML = `<span>${jevLastResult.backend}</span><span>${jevLastResult.latency_ms} ms · ${jevHz.toFixed(1)} Hz</span>`;
   }
   const probs = jevLastResult.probabilities || {};
-  for (const o of JEV_OPTIONS) {
+  for (const o of jevOptions()) {
     const pct = Math.round(clamp(probs[o.id] || 0, 0, 1) * 100);
     const row = $(`jrow-${o.id}`), bar = $(`jbar-${o.id}`), txt = $(`jpct-${o.id}`);
     if (row) row.classList.toggle('top', jevLastResult.prediction === o.id && jevMode !== 'off');
@@ -703,9 +714,131 @@ function updateJevHUD() {
   }
   if (st) {
     st.textContent = jevMode === 'off' ? '' : (jevLastResult.summary || 'Waiting for race start...');
-    if (jevSensors) st.textContent += `
+    if (jevMode === 'tactics' && player) st.textContent += `
+BATTERY ${Math.round(player.battery)}%`;
+    else if (jevSensors) st.textContent += `
 SENSOR ${SENSOR_ANGLES.map((d, k) => `${d > 0 ? 'R' : d < 0 ? 'L' : ''}${Math.abs(d)}:${jevSensors.rays[k]}`).join(' ')} m`;
   }
+}
+
+// ---------------------------------------------------------------- two-layer pilot: Jev-Omni tactics
+// Upper layer (Jev-Omni or a baseline policy) picks a tactic about once a second.
+// Lower layer (a plain controller) follows the racing line at a fixed pace, stays behind
+// slower cars unless told to pass, and applies the chosen battery mode.
+const TACTICS = [
+  { id: 'NORMAL',     label: 'NORMAL',      text: 'Drive normally on the racing line' },
+  { id: 'BOOST',      label: 'BOOST',       text: 'Use the battery boost to accelerate harder' },
+  { id: 'HARVEST',    label: 'HARVEST',     text: 'Save energy: lift slightly and recharge the battery' },
+  { id: 'PASS_LEFT',  label: 'PASS LEFT',   text: 'Overtake the car ahead on its left side' },
+  { id: 'PASS_RIGHT', label: 'PASS RIGHT',  text: 'Overtake the car ahead on its right side' },
+];
+const TACTIC_PACE = 1.0;          // controller pace (speed-profile grip factor), same for every policy
+const TACTIC_DT = 0.6;            // decision interval for the non-model policies (game seconds)
+const ERS = { BOOST: { accel: 1.35, rate: -14 }, HARVEST: { accel: 0.8, rate: 7 }, other: { accel: 1, rate: 1.5 } };
+let tacticPolicy = 'jev';         // 'jev' | 'rule' | 'pass_only' | 'random' | 'fixed' | 'fixed:<TACTIC>'
+let tactic = 'NORMAL', tacticLane = 0, tacticProfile = null;
+let tacticRng = 1;
+
+function jevOptions() { return jevMode === 'tactics' ? TACTICS : JEV_OPTIONS; }
+
+function resetTactics() {
+  tactic = 'NORMAL'; tacticLane = 0; tacticRng = 12345;
+  tacticProfile = tacticProfile || speedProfile(TACTIC_PACE);
+  if (player) player.battery = 50;
+}
+
+// the next corner ahead of the car (course knowledge belongs to the controller layer; the tactic prompt gets a summary)
+function nextCorner(car) {
+  for (let k = 0; k < 250; k++) {
+    const c = track.curvS[(car.idx + k) % track.n];
+    if (Math.abs(c) > 0.004) return { dist: Math.round(k * track.ds), dir: c > 0 ? 'right' : 'left', sharp: Math.abs(c) > 0.009 };
+  }
+  return { dist: 500, dir: 'none', sharp: false };
+}
+
+function carAhead(car, range = 45) {
+  let best = null;
+  for (const o of cars) {
+    if (o === car) continue;
+    const gap = wrapDelta(o.s - car.s);
+    if (gap > -4 && gap < range && (!best || gap < best.gap)) best = { car: o, gap };
+  }
+  if (!best) return null;
+  const o = best.car, room = (d) => +(d - 1.0).toFixed(1);
+  return { car: o, name: o.name, gap: best.gap, dv: (o.v - car.v) * 3.6, d: o.d,
+    roomLeft: room(track.halfW + o.d), roomRight: room(track.halfW - o.d), overlap: Math.abs(o.d - car.d) < 2.3 };
+}
+
+function tacticState(car) {
+  const st = standings(), pos = st.indexOf(car) + 1, corner = nextCorner(car), ah = carAhead(car);
+  const lap = clamp(car.laps.length + 1, 1, laps);
+  let text = `F1 race, lap ${lap} of ${laps}, position ${pos} of ${cars.length}. Speed ${Math.round(car.v * 3.6)} km/h. Battery ${Math.round(car.battery)}%. `;
+  text += corner.dist < 15 ? `The car is in a ${corner.sharp ? 'sharp ' : ''}${corner.dir} corner now. `
+    : `Straight road for the next ${corner.dist} m, then a ${corner.sharp ? 'sharp ' : ''}${corner.dir} corner. `;
+  if (ah && ah.gap < 40) {
+    text += `Car ahead: ${ah.name}, ${Math.max(0, Math.round(ah.gap))} m ahead, ${Math.abs(Math.round(ah.dv))} km/h ${ah.dv < 0 ? 'slower' : 'faster'} than you. ` +
+      `Free space beside it: ${Math.max(0, ah.roomLeft)} m on its left, ${Math.max(0, ah.roomRight)} m on its right (a car needs about 3 m).`;
+  } else text += 'No car within 40 m ahead.';
+  return { text, corner, ahead: ah, pos };
+}
+
+// baseline policies
+function ruleTactic(ts, car) {
+  const ah = ts.ahead;
+  if (ah && ah.gap < 30 && ah.dv < 3) {
+    if (Math.max(ah.roomLeft, ah.roomRight) >= 3) return ah.roomLeft > ah.roomRight ? 'PASS_LEFT' : 'PASS_RIGHT';
+  }
+  if (ts.corner.dist > 120 && car.battery > 20) return 'BOOST';
+  if (ts.corner.dist < 40 && car.battery < 90) return 'HARVEST';
+  return 'NORMAL';
+}
+function randomTactic() {
+  tacticRng = (tacticRng * 1103515245 + 12345) & 0x7fffffff;
+  return TACTICS[tacticRng % TACTICS.length].id;
+}
+
+function decideTacticLocally(car) {
+  const ts = tacticState(car);
+  // 'fixed' = always NORMAL, 'fixed:<ID>' = always that tactic, 'pass_only' = rule without battery use
+  if (tacticPolicy === 'rule') tactic = ruleTactic(ts, car);
+  else if (tacticPolicy === 'pass_only') { const r = ruleTactic(ts, car); tactic = r.startsWith('PASS') ? r : 'NORMAL'; }
+  else if (tacticPolicy === 'random') tactic = randomTactic();
+  else tactic = tacticPolicy.startsWith('fixed:') ? tacticPolicy.slice(6) : 'NORMAL';
+  const probs = TACTICS.map((o) => (o.id === tactic ? 1 : 0));
+  applyJevProbs(probs, 0, `${tacticPolicy.toUpperCase()} POLICY`);
+}
+
+function stepTactics(car, ctl, dt) {
+  // upper layer
+  jevTimer -= dt;
+  if (tacticPolicy === 'jev') {
+    if (!jevBusy && jevTimer <= 0) { jevTimer = jevTiming === 'step' ? JEV_STEP_DT : 0; pollJev(car); }
+    if (TACTICS.some((o) => o.id === jevLastResult.prediction)) tactic = jevLastResult.prediction;
+  } else if (jevTimer <= 0) {
+    jevTimer = TACTIC_DT;
+    decideTacticLocally(car);
+  }
+  // lower layer: pace + traffic + lane
+  const i = car.idx;
+  let vt = tacticProfile[(i + 8) % track.n];
+  let lane = track.line[i] * 0.6;
+  const ah = carAhead(car, 30);
+  if (ah && ah.gap > -4) {
+    const passing = (tactic === 'PASS_LEFT' && ah.roomLeft >= 3) || (tactic === 'PASS_RIGHT' && ah.roomRight >= 3);
+    if (passing) lane = ah.d + (tactic === 'PASS_LEFT' ? -3.4 : 3.4);
+    else if (ah.overlap && ah.gap > 0 && ah.gap < 14) vt = Math.min(vt, ah.car.v - 1);   // stay behind
+  }
+  tacticLane = lerp(tacticLane, clamp(lane, -track.halfW + 1.2, track.halfW - 1.2), 1 - Math.exp(-dt * 1.5));
+  ctl.gas = car.v < vt * 0.98;
+  ctl.brake = car.v > vt * 1.03;
+  const p = track.frameAt(car.s + 12 + car.v * 0.3);
+  const toT = p.pos.clone().addScaledVector(p.right, tacticLane).sub(car.pos);
+  const err = wrapAngle(Math.atan2(toT.x, toT.z) - car.yaw);
+  ctl.steerAxis = clamp(-err * 6, -1, 1);
+  // battery (ERS)
+  const mode = car.battery > 0 && tactic === 'BOOST' ? ERS.BOOST : tactic === 'HARVEST' ? ERS.HARVEST : ERS.other;
+  ctl.ers = mode.accel;
+  car.battery = clamp(car.battery + mode.rate * dt, 0, 100);
 }
 
 // ---------------------------------------------------------------- main loop
@@ -833,12 +966,13 @@ window.__aurora = {
   run(sec, k = {}) { Object.assign(keys, k); for (let t = 0; t < sec; t += 1 / 60) tick(1 / 60, t + 1 / 60 >= sec); updateHUD(); return this.info(); },
   info: () => ({ state, raceTime: +raceTime.toFixed(2), v: +(player?.v * 3.6).toFixed(1), s: +player?.s.toFixed(1),
     d: +player?.d.toFixed(2), dist: +player?.dist.toFixed(1), laps: player?.laps, pos: standings().indexOf(player) + 1,
-    jevMode, jevLastResult,
+    surface: player?.surface, jevMode, jevLastResult,
     ai: cars.filter((c) => !c.isPlayer).map((c) => ({ n: c.name, v: +(c.v * 3.6).toFixed(0), dist: +c.dist.toFixed(0), laps: c.laps.map((x) => +x.toFixed(2)) })) }),
   freeze: (on) => { frozen = on; },
   cam: (i) => { camMode = (i + CAMS.length - 1) % CAMS.length; cycleCam(); },
   auto: (on, skill = 0.9) => { debugAuto = on ? speedProfile(skill) : null; },
   jev: (mode = 'text') => { jevMode = mode; if (player) player.name = mode === 'off' ? 'YOU' : 'JEV-OMNI'; initJevHUD(); return jevMode; },
+  policy: (p) => { if (p) tacticPolicy = p; updateJevHUD(); return tacticPolicy; },
   timing: (t) => { if (t) jevTiming = t; updateJevHUD(); return jevTiming; },
   jevLog: () => jevLog,
   // evaluation only: the frame the model would see plus ground truth from the course (never sent to the model)
@@ -853,6 +987,7 @@ window.__aurora = {
     if (opts.diff !== undefined) diff = opts.diff;
     if (opts.jev) jevMode = opts.jev;
     if (opts.timing) jevTiming = opts.timing;
+    if (opts.policy) tacticPolicy = opts.policy;
     startDelay = 0;
     startRace();
     if (opts.cam !== undefined) { camMode = (opts.cam + CAMS.length - 1) % CAMS.length; cycleCam(); }
