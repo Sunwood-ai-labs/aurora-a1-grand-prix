@@ -354,12 +354,13 @@ function stepAI(car, dt, racing) {
   const prevS = car.s;
   car.s = (car.s + car.v * dt) % L;
   car.dist += wrapDelta(car.s - prevS);
-  car.d = lerp(car.d, car.lane, 1 - Math.exp(-dt * 3));
-  const p = track.frameAt(car.s), q = track.frameAt(car.s + 4 + car.v * 0.08);
+  car.d = clamp(lerp(car.d, car.lane, 1 - Math.exp(-dt * 3)), -track.wallD + 2, track.wallD - 2);
+  const p = track.frameAt(car.s), q = track.frameAt(car.s + 7 + car.v * 0.12);
   car.pos.copy(p.pos).addScaledVector(p.right, car.d);
-  const ahead = q.pos.clone().addScaledVector(q.right, car.lane);
-  const oldYaw = car.yaw;
-  car.yaw = Math.atan2(ahead.x - car.pos.x, ahead.z - car.pos.z);
+  const ahead = q.pos.clone().addScaledVector(q.right, lerp(car.d, car.lane, 0.5));
+  const oldYaw = car.yaw, tanYaw = Math.atan2(p.tan.x, p.tan.z);
+  // heading follows the path ahead, never more than ~17° off the track direction
+  car.yaw = tanYaw + clamp(wrapAngle(Math.atan2(ahead.x - car.pos.x, ahead.z - car.pos.z) - tanYaw), -0.3, 0.3);
   const yawRate = wrapAngle(car.yaw - oldYaw) / Math.max(dt, 1e-4);
   car.steer = clamp(-yawRate * WHEELBASE / Math.max(car.v, 3), -0.3, 0.3);
   car.vel.set(Math.sin(car.yaw), 0, Math.cos(car.yaw)).multiplyScalar(car.v);
@@ -380,7 +381,7 @@ function collide() {
       if (pushLat) {
         const push = (1.95 - Math.abs(dd)) * Math.sign(dd || 1);
         player.pos.addScaledVector(p.right, -push * 0.7);
-        o.d += push * 0.3; o.lane += push * 0.3;
+        o.d += push * 0.3; o.lane = clamp(o.lane + push * 0.3, -track.halfW + 1.4, track.halfW - 1.4);
         player.vel.addScaledVector(p.right, -Math.sign(dd || 1) * 2);
       } else {
         const behind = ds > 0;           // player behind rival
@@ -492,7 +493,8 @@ let shakeT = 0, hudT = 0;
 const clock = new THREE.Clock();
 function frame() {
   requestAnimationFrame(frame);
-  tick(Math.min(clock.getDelta(), 1 / 20));
+  const dt = Math.min(clock.getDelta(), 1 / 20);
+  if (!frozen) tick(dt);
 }
 function tick(dt, draw = true) {
   if (state === 'loading' || state === 'title') {
@@ -552,7 +554,7 @@ function tick(dt, draw = true) {
   sun.target.position.copy(player.pos);
   if (draw) renderer.render(scene, camera);
 }
-let startDelay = 0, debugAuto = null;
+let startDelay = 0, debugAuto = null, frozen = false;
 
 // steer toward the racing line (used after the flag)
 function autoSteer(car, ctl) {
@@ -606,6 +608,7 @@ window.__aurora = {
   info: () => ({ state, raceTime: +raceTime.toFixed(2), v: +(player?.v * 3.6).toFixed(1), s: +player?.s.toFixed(1),
     d: +player?.d.toFixed(2), dist: +player?.dist.toFixed(1), laps: player?.laps, pos: standings().indexOf(player) + 1,
     ai: cars.filter((c) => !c.isPlayer).map((c) => ({ n: c.name, v: +(c.v * 3.6).toFixed(0), dist: +c.dist.toFixed(0), laps: c.laps.map((x) => +x.toFixed(2)) })) }),
+  freeze: (on) => { frozen = on; },
   cam: (i) => { camMode = (i + CAMS.length - 1) % CAMS.length; cycleCam(); },
   auto: (on, skill = 0.9) => { debugAuto = on ? speedProfile(skill) : null; },
 };
